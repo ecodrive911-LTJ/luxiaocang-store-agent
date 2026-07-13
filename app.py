@@ -1,3 +1,8 @@
+"""
+鹿小仓 便利店经营决策Agent v0.4
+多租户架构 — 支持多用户多门店同时在线
+"""
+
 import configparser
 import os
 import json
@@ -7,11 +12,15 @@ import uuid
 import asyncio
 import httpx
 from pathlib import Path
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, register_tool, TOOLS
+from auth import (
+    hash_password, verify_password, create_session, verify_session,
+    invalidate_session, get_user_stores, get_store_by_id, extract_token
+)
 
 # ===== Paths =====
 BASE_DIR = Path(__file__).parent.resolve()
@@ -39,9 +48,14 @@ DEFAULT_CONFIG = {
     },
     "agent": {
         "name": "鹿小仓",
-        "version": "0.3",
+        "version": "0.4",
         "brand": "复投科技出品",
-    }
+    },
+    "auth": {
+        "secret_key": "luxiaocang-secret-2024",
+        "session_ttl_hours": "168",
+        "allow_registration": "true",
+    },
 }
 
 def load_config():
@@ -53,7 +67,6 @@ def load_config():
     cfg = {}
     for section in parser.sections():
         cfg[section] = dict(parser[section])
-    # merge with defaults
     for k, v in DEFAULT_CONFIG.items():
         if k not in cfg:
             cfg[k] = v
@@ -72,35 +85,64 @@ config = load_config()
 def init_db():
     conn = sqlite3.connect(str(DB_PATH))
     c = conn.cursor()
-    c.execute("""CREATE TABLE IF NOT EXISTS conversations (
+
+    # ===== 新表 =====
+    c.execute("""CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
-        role TEXT,
-        content TEXT,
-        timestamp REAL,
-        session_id TEXT DEFAULT 'default'
-    )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        type TEXT,
-        status TEXT DEFAULT 'pending',
-        params TEXT,
-        result TEXT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        phone TEXT,
+        role TEXT DEFAULT 'owner',
         created_at REAL,
         updated_at REAL
     )""")
-    c.execute("""CREATE TABLE IF NOT EXISTS data_assets (
+
+    c.execute("""CREATE TABLE IF NOT EXISTS stores (
         id TEXT PRIMARY KEY,
-        name TEXT,
-        type TEXT,
-        path TEXT,
-        rows INTEGER,
-        description TEXT,
-        created_at REAL
+        name TEXT NOT NULL,
+        address TEXT,
+        city TEXT,
+        district TEXT,
+        owner_id TEXT NOT NULL,
+        created_at REAL,
+        FOREIGN KEY (owner_id) REFERENCES users(id)
     )""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS user_stores (
+        user_id TEXT NOT NULL,
+        store_id TEXT NOT NULL,
+        role TEXT DEFAULT 'owner',
+        PRIMARY KEY (user_id, store_id),
+        FOREIGN KEY (user_id) REFERENCES users(id),
+        FOREIGN KEY (store_id) REFERENCES stores(id)
+    )""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        created_at REAL,
+        expires_at REAL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+    )""")
+
+    # ===== 现有表改造：加 user_id, store_id =====
+    # SQLite 不支持 IF NOT EXISTS 加列，需要检查
+    def column_exists(table, col):
+        cols = [r[1] for r in c.execute(f"PRAGMA table_info({table})").fetchall()]
+        return col in cols
+
+    for table in ["conversations", "tasks", "data_assets"]:
+        if not column_exists(table, "user_id"):
+            c.execute(f"ALTER TABLE {table} ADD COLUMN user_id TEXT")
+        if not column_exists(table, "store_id"):
+            c.execute(f"ALTER TABLE {table} ADD COLUMN store_id TEXT")
+
     conn.commit()
     conn.close()
 
 init_db()
+
 
 def db_query(sql, params=(), fetch="all"):
     conn = sqlite3.connect(str(DB_PATH))
@@ -125,60 +167,24 @@ def db_exec(sql, params=()):
     conn.commit()
     conn.close()
 
-# ===== LLM (保留旧接口兼容，实际调用走agent_loop) =====
-async def call_llm(messages, api_key=None, model=None, stream=True):
-    """旧版LLM调用接口（保留兼容）"""
-    cfg = load_config()
-    llm_cfg = cfg.get("llm", {})
-    key = api_key or llm_cfg.get("api_key", "")
-    base_url = llm_cfg.get("base_url", "https://ark.cn-beijing.volces.com/api/v3")
-    mdl = model or llm_cfg.get("model", "")
 
-    if not key:
-        yield "⚠️ 未配置API Key。请在设置页面配置大模型API Key。"
-        return
+# ===== 鉴权依赖 =====
+async def require_auth(request: Request):
+    """FastAPI 依赖：验证用户登录"""
+    token = extract_token(request)
+    if not token:
+        raise HTTPException(status_code=401, detail="未登录")
+    user = verify_session(DB_PATH, token)
+    if not user:
+        raise HTTPException(status_code=401, detail="会话已过期，请重新登录")
+    return user
 
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json"
-    }
-
-    payload = {
-        "model": mdl,
-        "messages": messages,
-        "stream": stream,
-        "temperature": 0.7,
-        "max_tokens": 4096,
-    }
-
-    url = f"{base_url}/chat/completions"
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            if stream:
-                async with client.stream("POST", url, headers=headers, json=payload) as resp:
-                    if resp.status_code != 200:
-                        body = await resp.aread()
-                        yield f"❌ API错误 ({resp.status_code}): {body.decode()}"
-                        return
-                    async for line in resp.aiter_lines():
-                        if line.startswith("data: "):
-                            data = line[6:]
-                            if data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                                content = delta.get("content", "")
-                                if content:
-                                    yield content
-                            except json.JSONDecodeError:
-                                continue
-            else:
-                resp = await client.post(url, headers=headers, json=payload)
-                data = resp.json()
-                yield data.get("choices", [{}])[0].get("message", {}).get("content", "")
-    except Exception as e:
-        yield f"❌ 请求失败: {str(e)}"
+async def require_auth_optional(request: Request):
+    """可选鉴权：有 token 就验证，没有就返回 None"""
+    token = extract_token(request)
+    if not token:
+        return None
+    return verify_session(DB_PATH, token)
 
 
 # ===== System Prompt =====
@@ -188,42 +194,8 @@ SYSTEM_PROMPT = """你是「鹿小仓」，一个便利店经营决策Agent。
 你不是搜索引擎，不是报告生成器。你是一个能采集数据→分析问题→给出方案→追踪执行的闭环系统。
 你背后有一支虚拟专家团队：消费品行业分析师、投行专家、供应链企业领导人、便利店连锁经营高管。
 
-## 知识资产（独立目录，不依赖任何平台）
-你的全部知识资产存储在本地 knowledge/ 目录下，包含：
-
-### 门店数据
-- 鹿小仓广安店：2,941 SKU（knowledge/stores/鹿小仓广安店_库存合并总表.xlsx）
-- 鹿小仓财富店：1,386 SKU（knowledge/stores/鹿小仓财富店_库存合并总表.xlsx）
-- 广安店最终调价方案（76条执行调价）
-- 财富店最终调价方案（85条执行调价）
-
-### 竞品数据
-- 小柴购：7,659 SKU（knowledge/competitors/小柴购_全量数据表_v5.xlsx）
-- 厉臣超市：1,996 SKU（精品店定位）
-- 竞争对比分析报告（广安店vs小柴购、财富店vs厉臣）
-
-### 行业数据
-- 商圈POI扫描数据
-- 高德API商圈扫描方法论
-- 能力边界审计报告
-
-### 架构蓝图
-- 架构蓝图v0.1：9大模块覆盖建店前/中/后全周期
-- 架构蓝图v0.2：三层架构（采集→分析→决策）+ 两端形态（商家端+管理端）
-- 信息采集能力体系v0.1：8种采集能力+多平台交叉验证
-
-### 业务脚本（scripts/目录）
-- compare_price.py：商品比价（模糊匹配+规格校验）
-- gen_price_plan.py：调价方案生成
-- competitive_analysis.py：竞争对比分析
-- data_merge.py：数据合并处理
-- ocr_extract.py：OCR识别
-
-### 案例库
-- 比价调价全流程记录（含规格校验、人工复核、最终执行）
-- 竞争分析案例
-- Agent内核逻辑拆解
-- 独立化方案
+## 知识资产
+你的全部知识资产存储在本地 knowledge/ 目录下，包含门店数据、竞品数据、行业数据、架构蓝图等。
 
 ## 能力（9大模块）
 1. 选址评估：商圈POI分析、竞品密度、选址评分
@@ -241,32 +213,40 @@ SYSTEM_PROMPT = """你是「鹿小仓」，一个便利店经营决策Agent。
 - 务实诚实：做不到的说做不到，做到的说能做到
 - 数据说话：每个结论尽量有数据支撑
 - 简洁有力：不废话，直接给方案
-
-## 当前版本
-v0.3 — Agent Loop引擎已集成，支持工具调用
 """
 
-def get_conversation_history(session_id="default", limit=20):
-    rows = db_query(
-        "SELECT role, content FROM conversations WHERE session_id=? ORDER BY timestamp DESC LIMIT ?",
-        (session_id, limit),
-        fetch="all"
-    )
+
+def get_conversation_history(session_id="default", limit=20, user_id=None, store_id=None):
+    """获取对话历史（按用户和门店隔离）"""
+    sql = "SELECT role, content FROM conversations WHERE 1=1"
+    params = []
+    if user_id:
+        sql += " AND user_id = ?"
+        params.append(user_id)
+    if store_id:
+        sql += " AND (store_id = ? OR store_id IS NULL)"
+        params.append(store_id)
+    sql += " ORDER BY timestamp DESC LIMIT ?"
+    params.append(limit)
+    rows = db_query(sql, tuple(params), fetch="all")
     rows.reverse()
     return [{"role": r["role"], "content": r["content"]} for r in rows]
 
-def save_message(role, content, session_id="default"):
+def save_message(role, content, session_id="default", user_id=None, store_id=None):
     db_exec(
-        "INSERT INTO conversations (id, role, content, timestamp, session_id) VALUES (?, ?, ?, ?, ?)",
-        (str(uuid.uuid4()), role, content, time.time(), session_id)
+        "INSERT INTO conversations (id, role, content, timestamp, session_id, user_id, store_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (str(uuid.uuid4()), role, content, time.time(), session_id, user_id, store_id)
     )
+
 
 # ===== FastAPI =====
 app = FastAPI(title="鹿小仓")
 
+# ===== 请求模型 =====
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
+    store_id: str = None
 
 class ConfigRequest(BaseModel):
     provider: str = None
@@ -274,19 +254,169 @@ class ConfigRequest(BaseModel):
     base_url: str = None
     model: str = None
 
-@app.get("/", response_class=HTMLResponse)
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    display_name: str = None
+    phone: str = None
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+class StoreRequest(BaseModel):
+    name: str
+    address: str = None
+    city: str = None
+    district: str = None
+
+
+# ===== 认证接口 =====
+@app.post("/api/auth/register")
+async def register(req: RegisterRequest):
+    """用户注册"""
+    allow_reg = config.get("auth", {}).get("allow_registration", "true") == "true"
+    if not allow_reg:
+        raise HTTPException(status_code=403, detail="注册已关闭")
+
+    if len(req.username) < 2:
+        raise HTTPException(status_code=400, detail="用户名至少2个字符")
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="密码至少6个字符")
+
+    # 检查用户名是否已存在
+    existing = db_query("SELECT id FROM users WHERE username = ?", (req.username,), fetch="one")
+    if existing:
+        raise HTTPException(status_code=409, detail="用户名已存在")
+
+    user_id = str(uuid.uuid4())
+    now = time.time()
+    db_exec(
+        "INSERT INTO users (id, username, password_hash, display_name, phone, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (user_id, req.username, hash_password(req.password), req.display_name, req.phone, "owner", now, now)
+    )
+
+    token = create_session(DB_PATH, user_id)
+    return {
+        "ok": True,
+        "message": "注册成功",
+        "token": token,
+        "user": {
+            "id": user_id,
+            "username": req.username,
+            "display_name": req.display_name or req.username,
+            "role": "owner",
+        }
+    }
+
+@app.post("/api/auth/login")
+async def login(req: LoginRequest):
+    """用户登录"""
+    user = db_query("SELECT * FROM users WHERE username = ?", (req.username,), fetch="one")
+    if not user:
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+    if not verify_password(req.password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+    token = create_session(DB_PATH, user["id"])
+    return {
+        "ok": True,
+        "token": token,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "display_name": user["display_name"] or user["username"],
+            "role": user["role"],
+        }
+    }
+
+@app.post("/api/auth/logout")
+async def logout(request: Request):
+    """登出"""
+    token = extract_token(request)
+    if token:
+        invalidate_session(DB_PATH, token)
+    return {"ok": True, "message": "已登出"}
+
+@app.get("/api/auth/me")
+async def me(user: dict = Depends(require_auth)):
+    """获取当前用户信息"""
+    stores = get_user_stores(DB_PATH, user["user_id"])
+    return {
+        "user": user,
+        "stores": stores,
+    }
+
+
+# ===== 门店管理接口 =====
+@app.get("/api/stores")
+async def list_stores(user: dict = Depends(require_auth)):
+    """获取当前用户的门店列表"""
+    stores = get_user_stores(DB_PATH, user["user_id"])
+    return {"stores": stores}
+
+@app.post("/api/stores")
+async def create_store(req: StoreRequest, user: dict = Depends(require_auth)):
+    """添加门店"""
+    store_id = str(uuid.uuid4())
+    now = time.time()
+    db_exec(
+        "INSERT INTO stores (id, name, address, city, district, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (store_id, req.name, req.address, req.city, req.district, user["user_id"], now)
+    )
+    # 关联到用户
+    db_exec(
+        "INSERT INTO user_stores (user_id, store_id, role) VALUES (?, ?, ?)",
+        (user["user_id"], store_id, "owner")
+    )
+    return {
+        "ok": True,
+        "store": {
+            "id": store_id,
+            "name": req.name,
+            "address": req.address,
+            "city": req.city,
+            "district": req.district,
+        }
+    }
+
+@app.put("/api/stores/{store_id}")
+async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(require_auth)):
+    """修改门店"""
+    store = get_store_by_id(DB_PATH, store_id, user["user_id"])
+    if not store:
+        raise HTTPException(status_code=404, detail="门店不存在或无权限")
+    db_exec(
+        "UPDATE stores SET name=?, address=?, city=?, district=? WHERE id=?",
+        (req.name, req.address, req.city, req.district, store_id)
+    )
+    return {"ok": True}
+
+@app.delete("/api/stores/{store_id}")
+async def delete_store(store_id: str, user: dict = Depends(require_auth)):
+    """删除门店"""
+    store = get_store_by_id(DB_PATH, store_id, user["user_id"])
+    if not store:
+        raise HTTPException(status_code=404, detail="门店不存在或无权限")
+    db_exec("DELETE FROM user_stores WHERE store_id=?", (store_id,))
+    db_exec("DELETE FROM stores WHERE id=?", (store_id,))
+    return {"ok": True}
+
+
+# ===== 业务接口（改造现有接口）=====
+@app.get("/")
 async def index():
     html_path = STATIC_DIR / "index.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 @app.get("/api/status")
-async def status():
+async def status(user: dict = Depends(require_auth_optional)):
     cfg = load_config()
     llm = cfg.get("llm", {})
     has_key = bool(llm.get("api_key"))
-    return {
+    result = {
         "agent_name": cfg.get("agent", {}).get("name", "鹿小仓"),
-        "version": cfg.get("agent", {}).get("version", "0.3"),
+        "version": cfg.get("agent", {}).get("version", "0.4"),
         "brand": cfg.get("agent", {}).get("brand", "复投科技出品"),
         "llm_configured": has_key,
         "llm_provider": llm.get("provider", ""),
@@ -295,10 +425,19 @@ async def status():
         "tools": list(TOOLS.keys()),
         "agent_loop_enabled": True,
     }
+    if user:
+        result["logged_in"] = True
+        result["user"] = user
+        result["stores"] = get_user_stores(DB_PATH, user["user_id"])
+    else:
+        result["logged_in"] = False
+    return result
 
 @app.get("/api/data/assets")
-async def data_assets():
-    rows = db_query("SELECT * FROM data_assets ORDER BY created_at DESC", fetch="all")
+async def data_assets(user: dict = Depends(require_auth)):
+    """数据资产（按用户隔离）"""
+    user_id = user["user_id"]
+    rows = db_query("SELECT * FROM data_assets WHERE user_id=? ORDER BY created_at DESC", (user_id,), fetch="all")
     builtin = [
         {"name": "鹿小仓广安店", "rows": 2941, "type": "门店"},
         {"name": "鹿小仓财富店", "rows": 1386, "type": "门店"},
@@ -309,18 +448,34 @@ async def data_assets():
     return {"builtin": builtin, "custom": rows, "total_sku": 13982}
 
 @app.post("/api/chat")
-async def chat(req: ChatRequest):
-    save_message("user", req.message, req.session_id)
-    history = get_conversation_history(req.session_id, limit=10)
+async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
+    """对话（按用户和门店隔离）"""
+    user_id = user["user_id"]
+    store_id = req.store_id
+
+    # 如果指定了门店，验证权限
+    if store_id:
+        store = get_store_by_id(DB_PATH, store_id, user_id)
+        if not store:
+            raise HTTPException(status_code=403, detail="无权访问该门店")
+
+    save_message("user", req.message, req.session_id, user_id, store_id)
+    history = get_conversation_history(req.session_id, limit=10, user_id=user_id, store_id=store_id)
+
+    # 注入门店上下文
+    store_context = ""
+    if store_id:
+        store_info = get_store_by_id(DB_PATH, store_id, user_id)
+        if store_info:
+            store_context = f"\n\n## 当前门店\n名称: {store_info['name']}\n地址: {store_info.get('address', '未知')}\n区域: {store_info.get('district', '未知')}"
 
     async def stream_response():
         full_reply = ""
         try:
-            # 使用 Agent Loop 引擎
-            async for chunk in agent_loop(req.message, history, config):
+            async for chunk in agent_loop(req.message, history, config, store_context=store_context):
                 full_reply += chunk
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
-            save_message("assistant", full_reply, req.session_id)
+            save_message("assistant", full_reply, req.session_id, user_id, store_id)
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -329,20 +484,27 @@ async def chat(req: ChatRequest):
 
 @app.get("/api/tools")
 async def list_tools():
-    """列出所有可用的Agent工具"""
     return {
         "tools": [
-            {
-                "name": t["name"],
-                "description": t["description"],
-                "parameters": t["parameters"],
-            }
+            {"name": t["name"], "description": t["description"], "parameters": t["parameters"]}
             for t in TOOLS.values()
         ]
     }
 
+@app.get("/api/conversations")
+async def conversations(session_id: str = "default", limit: int = 50, user: dict = Depends(require_auth)):
+    """对话历史（按用户隔离）"""
+    rows = db_query(
+        "SELECT * FROM conversations WHERE user_id=? ORDER BY timestamp DESC LIMIT ?",
+        (user["user_id"], limit),
+        fetch="all"
+    )
+    rows.reverse()
+    return {"messages": rows}
+
 @app.get("/api/config")
-async def get_config():
+async def get_config(user: dict = Depends(require_auth)):
+    """获取配置（需要登录）"""
     cfg = load_config()
     llm = cfg.get("llm", {})
     return {
@@ -354,7 +516,8 @@ async def get_config():
     }
 
 @app.put("/api/config")
-async def update_config(req: ConfigRequest):
+async def update_config(req: ConfigRequest, user: dict = Depends(require_auth)):
+    """更新配置（需要登录）"""
     cfg = load_config()
     if "llm" not in cfg:
         cfg["llm"] = {}
@@ -380,29 +543,50 @@ async def update_config(req: ConfigRequest):
     save_config(cfg)
     return {"ok": True, "message": "配置已保存"}
 
-@app.get("/api/conversations")
-async def conversations(session_id: str = "default", limit: int = 50):
-    rows = db_query(
-        "SELECT * FROM conversations WHERE session_id=? ORDER BY timestamp DESC LIMIT ?",
-        (session_id, limit),
-        fetch="all"
+
+# ===== 数据迁移：首次升级时自动创建默认用户 =====
+def migrate_default_user():
+    """如果 users 表为空，创建默认用户并迁移现有数据"""
+    count = db_query("SELECT COUNT(*) as c FROM users", fetch="one")
+    if count and count["c"] > 0:
+        return  # 已有用户，跳过
+
+    print("[迁移] 首次升级，创建默认用户 luxiaocang...")
+    user_id = str(uuid.uuid4())
+    now = time.time()
+    db_exec(
+        "INSERT INTO users (id, username, password_hash, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (user_id, "luxiaocang", hash_password("LXC2025"), "鹿小仓", "owner", now, now)
     )
-    rows.reverse()
-    return {"messages": rows}
+
+    # 创建两个门店
+    store1_id = str(uuid.uuid4())
+    store2_id = str(uuid.uuid4())
+    db_exec(
+        "INSERT INTO stores (id, name, address, city, district, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (store1_id, "鹿小仓广安店", "承德双桥区广安购物中心", "承德", "双桥区", user_id, now)
+    )
+    db_exec(
+        "INSERT INTO stores (id, name, address, city, district, owner_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (store2_id, "鹿小仓财富店", "承德双滦区财富广场", "承德", "双滦区", user_id, now)
+    )
+    # 关联
+    db_exec("INSERT INTO user_stores (user_id, store_id, role) VALUES (?, ?, ?)", (user_id, store1_id, "owner"))
+    db_exec("INSERT INTO user_stores (user_id, store_id, role) VALUES (?, ?, ?)", (user_id, store2_id, "owner"))
+
+    # 给现有对话记录打上 user_id
+    db_exec("UPDATE conversations SET user_id = ?", (user_id,))
+
+    print(f"[迁移] 完成。用户: luxiaocang, 门店: 广安店({store1_id[:8]}), 财富店({store2_id[:8]})")
+
+migrate_default_user()
+
 
 # ===== Main =====
 if __name__ == "__main__":
     import uvicorn
-    import webbrowser
-    import threading
     host = config.get("server", {}).get("host", "127.0.0.1")
     port = int(config.get("server", {}).get("port", "8420"))
     url = f"http://{host}:{port}"
-
-    def open_browser():
-        time.sleep(1.5)
-        webbrowser.open(url)
-
-    print(f"鹿小仓启动中... {url}")
-    threading.Thread(target=open_browser, daemon=True).start()
+    print(f"鹿小仓 v0.4 启动中... {url}")
     uvicorn.run(app, host=host, port=port, log_level="info")

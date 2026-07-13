@@ -145,7 +145,7 @@ async def call_llm_stream(messages: list, config: dict, timeout: int = 120) -> A
 
 
 # ===== Agent Loop 核心 =====
-async def agent_loop(user_message: str, history: list, config: dict, max_iterations: int = 5) -> AsyncGenerator[str, None]:
+async def agent_loop(user_message: str, history: list, config: dict, max_iterations: int = 5, store_context: str = "") -> AsyncGenerator[str, None]:
     """
     Agent Loop 主循环。
     1. 把用户消息+历史发给LLM，要求它决定是否需要调用工具
@@ -158,6 +158,7 @@ async def agent_loop(user_message: str, history: list, config: dict, max_iterati
     ]) or "（暂无注册工具）"
 
     system_prompt = f"""你是「鹿小仓」，一个便利店经营决策Agent。
+{store_context}
 
 你可以使用以下工具来完成任务：
 
