@@ -36,6 +36,66 @@ body {
   flex-direction: column;
 }
 
+/* ===== Auth Screen ===== */
+.auth-screen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg);
+  z-index: 200;
+}
+.auth-card {
+  width: 380px;
+  max-width: 90%;
+}
+.auth-logo {
+  width: 64px; height: 64px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 32px;
+  margin: 0 auto 20px;
+  box-shadow: 0 0 28px var(--accent-glow);
+}
+.auth-title { text-align: center; font-size: 22px; font-weight: 700; margin-bottom: 6px; }
+.auth-sub { text-align: center; font-size: 13px; color: var(--text-dim); margin-bottom: 28px; }
+.auth-tabs {
+  display: flex; gap: 0; margin-bottom: 20px;
+  background: var(--bg-card); border-radius: var(--radius-sm); overflow: hidden;
+  border: 1px solid var(--border);
+}
+.auth-tab {
+  flex: 1; padding: 10px; text-align: center;
+  font-size: 14px; color: var(--text-dim); cursor: pointer;
+  transition: all 0.2s; border: none; background: none;
+  font-family: inherit;
+}
+.auth-tab.active { background: var(--accent); color: white; font-weight: 600; }
+.auth-field { margin-bottom: 14px; }
+.auth-field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 5px; }
+.auth-field input {
+  width: 100%; padding: 12px 14px;
+  background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); color: var(--text);
+  font-size: 14px; font-family: inherit; outline: none;
+  transition: border-color 0.15s;
+}
+.auth-field input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.auth-btn {
+  width: 100%; padding: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+  border: none; border-radius: var(--radius-sm);
+  color: white; font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: all 0.15s; font-family: inherit;
+  margin-top: 6px;
+}
+.auth-btn:hover { transform: scale(1.02); box-shadow: 0 4px 20px var(--accent-glow); }
+.auth-btn:disabled { opacity: 0.5; cursor: wait; }
+.auth-error {
+  color: var(--danger); font-size: 13px; text-align: center;
+  margin-top: 12px; min-height: 18px;
+}
+.auth-hint { text-align: center; font-size: 12px; color: var(--text-faint); margin-top: 16px; }
+
 /* ===== Top Bar ===== */
 .topbar {
   background: var(--bg-chat);
@@ -72,7 +132,24 @@ body {
   animation: pulse 2s infinite;
 }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
-.topbar-right { margin-left: auto; display: flex; gap: 8px; }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* Store Selector */
+.store-selector {
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.store-selector:hover { border-color: var(--accent); }
+.store-selector option { background: var(--bg-card); }
+
 .topbar-btn {
   padding: 6px 14px;
   background: var(--bg-card);
@@ -82,6 +159,7 @@ body {
   font-size: 12px;
   cursor: pointer;
   transition: all 0.15s;
+  font-family: inherit;
 }
 .topbar-btn:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -148,6 +226,20 @@ body {
 .config-val { color: var(--success); font-size: 11px; }
 .config-val.off { color: var(--danger); }
 
+.user-info {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 0;
+  font-size: 13px;
+}
+.user-avatar {
+  width: 28px; height: 28px; border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; flex-shrink: 0;
+}
+.user-name { font-weight: 600; }
+.user-role { font-size: 11px; color: var(--text-dim); }
+
 /* ===== Chat Area ===== */
 .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .chat-messages {
@@ -189,13 +281,8 @@ body {
   line-height: 1.75;
   color: var(--text);
 }
-.msg.agent .msg-bubble {
-  border-color: var(--border-light);
-}
-.msg.user .msg-bubble {
-  background: var(--bg-input);
-  border-color: var(--accent-dim);
-}
+.msg.agent .msg-bubble { border-color: var(--border-light); }
+.msg.user .msg-bubble { background: var(--bg-input); border-color: var(--accent-dim); }
 .msg-bubble p { margin-bottom: 8px; }
 .msg-bubble p:last-child { margin-bottom: 0; }
 .msg-bubble code {
@@ -205,26 +292,8 @@ body {
   font-size: 13px;
   font-family: 'Courier New', monospace;
 }
-.msg-bubble .action-card {
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: 6px;
-  padding: 10px 14px;
-  margin: 8px 0;
-}
-.msg-bubble .action-card .ac-title {
-  font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 3px;
-}
-.msg-bubble .action-card .ac-desc {
-  font-size: 13px; color: var(--text-dim);
-}
 
-/* Quick actions */
-.quick-actions {
-  display: flex; gap: 8px; flex-wrap: wrap;
-  margin-top: 10px;
-}
+.quick-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
 .quick-btn {
   padding: 6px 14px;
   background: var(--bg-card);
@@ -234,14 +303,10 @@ body {
   color: var(--text-dim);
   cursor: pointer;
   transition: all 0.15s;
+  font-family: inherit;
 }
-.quick-btn:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-glow);
-}
+.quick-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
 
-/* Typing indicator */
 .typing { display: flex; gap: 4px; padding: 8px 0; }
 .typing span {
   width: 8px; height: 8px; border-radius: 50%;
@@ -343,6 +408,7 @@ body {
   border: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text-dim);
+  font-family: inherit;
 }
 .modal-btn.primary {
   background: var(--accent);
@@ -387,6 +453,7 @@ body {
   cursor: pointer;
   transition: all 0.2s;
   text-align: left;
+  font-family: inherit;
 }
 .welcome-card:hover {
   border-color: var(--accent);
@@ -407,50 +474,106 @@ body {
   .topbar-sub { font-size: 10px; }
   .topbar-status { font-size: 10px; padding: 2px 8px; }
   .topbar-btn { padding: 5px 10px; font-size: 11px; }
-  .chat-input-area { padding: 10px 14px; gap: 8px; }
-  .chat-input { font-size: 16px; }
+  .store-selector { padding: 5px 10px; font-size: 12px; }
+  .input-bar { padding: 10px 14px; }
+  .input-box { font-size: 16px; }
   .send-btn { width: 38px; height: 38px; font-size: 16px; }
   .welcome-card { padding: 20px 16px; }
   .welcome-title { font-size: 20px; }
   .welcome-desc { font-size: 13px; }
 }
-
 @media (max-width: 480px) {
   .topbar-sub { display: none; }
   .topbar-status { display: none; }
   .topbar-title { font-size: 15px; }
   .chat-messages { padding: 12px 8px; }
   .msg { max-width: 92%; }
-  .msg-content { font-size: 14px; }
-  .welcome-card { padding: 16px 12px; }
   .welcome-title { font-size: 18px; }
   .welcome-desc { font-size: 12px; }
-  .quick-grid { grid-template-columns: 1fr; }
 }
 </style>
 </head>
 <body>
+
+<!-- ===== Auth Screen ===== -->
+<div class="auth-screen" id="authScreen" style="display:none;">
+  <div class="auth-card">
+    <div class="auth-logo">📊</div>
+    <div class="auth-title">鹿小仓</div>
+    <div class="auth-sub">便利店经营决策Agent · v0.4</div>
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLogin" onclick="switchAuthTab('login')">登录</button>
+      <button class="auth-tab" id="tabRegister" onclick="switchAuthTab('register')">注册</button>
+    </div>
+    <div id="loginForm">
+      <div class="auth-field">
+        <label>用户名</label>
+        <input type="text" id="loginUsername" placeholder="输入用户名" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <div class="auth-field">
+        <label>密码</label>
+        <input type="password" id="loginPassword" placeholder="输入密码" onkeydown="if(event.key==='Enter')doLogin()">
+      </div>
+      <button class="auth-btn" id="loginBtn" onclick="doLogin()">登 录</button>
+      <div class="auth-error" id="loginError"></div>
+    </div>
+    <div id="registerForm" style="display:none;">
+      <div class="auth-field">
+        <label>用户名</label>
+        <input type="text" id="regUsername" placeholder="至少2个字符">
+      </div>
+      <div class="auth-field">
+        <label>密码</label>
+        <input type="password" id="regPassword" placeholder="至少6个字符">
+      </div>
+      <div class="auth-field">
+        <label>显示名称（选填）</label>
+        <input type="text" id="regDisplayName" placeholder="如：张三">
+      </div>
+      <button class="auth-btn" id="regBtn" onclick="doRegister()">注 册</button>
+      <div class="auth-error" id="regError"></div>
+    </div>
+    <div class="auth-hint">默认账号：luxiaocang / LXC2025</div>
+  </div>
+</div>
 
 <!-- ===== Top Bar ===== -->
 <div class="topbar">
   <div class="logo">📊</div>
   <div>
     <div class="topbar-title">鹿小仓</div>
-    <div class="topbar-sub">便利店经营决策Agent · v0.3 · 复投科技出品</div>
+    <div class="topbar-sub">便利店经营决策Agent · v0.4 · 复投科技出品</div>
   </div>
   <div class="topbar-status">
     <span class="status-dot"></span>
     <span id="statusText">在线</span>
   </div>
   <div class="topbar-right">
+    <select class="store-selector" id="storeSelector" onchange="onStoreChange()">
+      <option value="">选择门店</option>
+    </select>
     <button class="topbar-btn" onclick="openConfig()">⚙️ 设置</button>
-    <button class="topbar-btn" onclick="clearChat()">🗑️ 清空</button>
+    <button class="topbar-btn" onclick="logout()">🚪 登出</button>
   </div>
 </div>
 
 <div class="app-body">
   <!-- ===== Sidebar ===== -->
   <div class="sidebar">
+    <!-- User Info -->
+    <div class="side-section">
+      <div class="side-title">▸ 当前用户</div>
+      <div class="side-card">
+        <div class="user-info">
+          <div class="user-avatar" id="sidebarAvatar">👤</div>
+          <div>
+            <div class="user-name" id="sidebarUsername">—</div>
+            <div class="user-role" id="sidebarRole">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Data Assets -->
     <div class="side-section">
       <div class="side-title">▸ 数据资产</div>
@@ -489,7 +612,6 @@ body {
       <div class="side-card">
         <div class="config-item"><span>大模型</span><span class="config-val off" id="cfgLlm">未配置</span></div>
         <div class="config-item"><span>采集引擎</span><span class="config-val">就绪</span></div>
-        <div class="config-item"><span>OCR引擎</span><span class="config-val">就绪</span></div>
         <div class="config-item"><span>高德API</span><span class="config-val">已配置</span></div>
       </div>
     </div>
@@ -509,7 +631,6 @@ body {
   <!-- ===== Chat Area ===== -->
   <div class="chat-area">
     <div class="chat-messages" id="messages">
-      <!-- Welcome screen -->
       <div class="welcome-screen" id="welcome">
         <div class="welcome-logo">📊</div>
         <div class="welcome-title">你好，我是鹿小仓</div>
@@ -552,17 +673,10 @@ body {
       </div>
     </div>
 
-    <!-- Input Bar -->
     <div class="input-bar">
       <div class="input-wrap">
-        <textarea
-          class="input-box"
-          id="input"
-          placeholder="跟鹿小仓说点什么..."
-          rows="1"
-          onkeydown="handleKey(event)"
-          oninput="autoResize(this)"
-        ></textarea>
+        <textarea class="input-box" id="input" placeholder="跟鹿小仓说点什么..." rows="1"
+          onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
         <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
       </div>
     </div>
@@ -603,48 +717,176 @@ body {
 </div>
 
 <script>
-const API = '';
+// ===== Auth State =====
+let token = localStorage.getItem('lxc_token') || '';
+let currentUser = null;
+let currentStoreId = '';
 let isStreaming = false;
 let hasMessages = false;
 
-// ===== Init =====
-async function init() {
-  const resp = await fetch('/api/status');
-  const data = await resp.json();
-  if (data.llm_configured) {
-    document.getElementById('cfgLlm').textContent = data.llm_model || '已配置';
-    document.getElementById('cfgLlm').classList.remove('off');
+// ===== API Helper =====
+async function api(path, options = {}) {
+  const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(path, { ...options, headers });
+  if (resp.status === 401) {
+    // Token expired
+    token = '';
+    localStorage.removeItem('lxc_token');
+    showAuthScreen();
+    throw new Error('会话过期，请重新登录');
   }
+  return resp;
+}
+
+// ===== Auth =====
+function showAuthScreen() {
+  document.getElementById('authScreen').style.display = 'flex';
+}
+function hideAuthScreen() {
+  document.getElementById('authScreen').style.display = 'none';
+}
+
+function switchAuthTab(tab) {
+  if (tab === 'login') {
+    document.getElementById('tabLogin').classList.add('active');
+    document.getElementById('tabRegister').classList.remove('active');
+    document.getElementById('loginForm').style.display = '';
+    document.getElementById('registerForm').style.display = 'none';
+  } else {
+    document.getElementById('tabLogin').classList.remove('active');
+    document.getElementById('tabRegister').classList.add('active');
+    document.getElementById('loginForm').style.display = 'none';
+    document.getElementById('registerForm').style.display = '';
+  }
+}
+
+async function doLogin() {
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  document.getElementById('loginError').textContent = '';
+  if (!username || !password) {
+    document.getElementById('loginError').textContent = '请输入用户名和密码';
+    return;
+  }
+  document.getElementById('loginBtn').disabled = true;
+  try {
+    const resp = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      document.getElementById('loginError').textContent = data.detail || '登录失败';
+      return;
+    }
+    token = data.token;
+    localStorage.setItem('lxc_token', token);
+    currentUser = data.user;
+    await afterLogin();
+  } catch (e) {
+    document.getElementById('loginError').textContent = '网络错误：' + e.message;
+  } finally {
+    document.getElementById('loginBtn').disabled = false;
+  }
+}
+
+async function doRegister() {
+  const username = document.getElementById('regUsername').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const display_name = document.getElementById('regDisplayName').value.trim();
+  document.getElementById('regError').textContent = '';
+  if (!username || !password) {
+    document.getElementById('regError').textContent = '请填写用户名和密码';
+    return;
+  }
+  document.getElementById('regBtn').disabled = true;
+  try {
+    const resp = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password, display_name: display_name || undefined }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      document.getElementById('regError').textContent = data.detail || '注册失败';
+      return;
+    }
+    token = data.token;
+    localStorage.setItem('lxc_token', token);
+    currentUser = data.user;
+    await afterLogin();
+  } catch (e) {
+    document.getElementById('regError').textContent = '网络错误：' + e.message;
+  } finally {
+    document.getElementById('regBtn').disabled = false;
+  }
+}
+
+async function logout() {
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+  token = '';
+  localStorage.removeItem('lxc_token');
+  currentUser = null;
+  showAuthScreen();
+}
+
+async function afterLogin() {
+  hideAuthScreen();
+  // Load user info and stores
+  try {
+    const resp = await api('/api/auth/me');
+    const data = await resp.json();
+    currentUser = data.user;
+    const stores = data.stores || [];
+    // Update sidebar
+    document.getElementById('sidebarAvatar').textContent = (currentUser.display_name || 'U')[0];
+    document.getElementById('sidebarUsername').textContent = currentUser.display_name || currentUser.username;
+    document.getElementById('sidebarRole').textContent = currentUser.role === 'owner' ? '店主' : currentUser.role;
+    // Populate store selector
+    const sel = document.getElementById('storeSelector');
+    sel.innerHTML = '<option value="">选择门店</option>';
+    for (const s of stores) {
+      const opt = document.createElement('option');
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sel.appendChild(opt);
+    }
+    if (stores.length > 0) {
+      sel.value = stores[0].id;
+      currentStoreId = stores[0].id;
+    }
+  } catch (e) {
+    console.error('Failed to load user info:', e);
+  }
+  // Load status
+  try {
+    const resp = await api('/api/status');
+    const data = await resp.json();
+    if (data.llm_configured) {
+      const el = document.getElementById('cfgLlm');
+      el.textContent = data.llm_model || '已配置';
+      el.classList.remove('off');
+    }
+  } catch (e) {}
   // Load conversation history
   await loadHistory();
 }
 
-async function loadHistory() {
-  const resp = await fetch('/api/conversations?limit=30');
-  const data = await resp.json();
-  if (data.messages && data.messages.length > 0) {
-    document.getElementById('welcome').style.display = 'none';
-    hasMessages = true;
-    for (const msg of data.messages) {
-      addMessage(msg.role, msg.content, false);
-    }
-    scrollToBottom();
-  }
+// ===== Store Selection =====
+function onStoreChange() {
+  currentStoreId = document.getElementById('storeSelector').value;
 }
 
 // ===== Chat =====
 function handleKey(e) {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 }
-
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 120) + 'px';
 }
-
 function sendQuick(text) {
   document.getElementById('input').value = text;
   sendMessage();
@@ -654,17 +896,13 @@ function sendMessage() {
   const input = document.getElementById('input');
   const text = input.value.trim();
   if (!text || isStreaming) return;
-
   if (!hasMessages) {
     document.getElementById('welcome').style.display = 'none';
     hasMessages = true;
   }
-
   addMessage('user', text);
   input.value = '';
   input.style.height = 'auto';
-
-  // Stream response
   streamChat(text);
 }
 
@@ -672,11 +910,9 @@ function addMessage(role, content, animate = true) {
   const messages = document.getElementById('messages');
   const msg = document.createElement('div');
   msg.className = `msg ${role}`;
-
   const avatar = document.createElement('div');
   avatar.className = 'msg-avatar';
   avatar.textContent = role === 'user' ? '👤' : '📊';
-
   const bubble = document.createElement('div');
   bubble.className = 'msg-bubble';
   if (animate) {
@@ -684,7 +920,6 @@ function addMessage(role, content, animate = true) {
   } else {
     bubble.innerHTML = formatContent(content);
   }
-
   msg.appendChild(avatar);
   msg.appendChild(bubble);
   messages.appendChild(msg);
@@ -695,17 +930,15 @@ function addMessage(role, content, animate = true) {
 async function streamChat(text) {
   isStreaming = true;
   document.getElementById('sendBtn').disabled = true;
-
   const bubble = addMessage('agent', '');
   let fullContent = '';
 
   try {
-    // XMLHttpRequest流式接收，兼容所有浏览器
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/chat', true);
     xhr.setRequestHeader('Content-Type', 'application/json');
+    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
     xhr.responseType = 'text';
-
     let lastIndex = 0;
     let buffer = '';
 
@@ -715,7 +948,6 @@ async function streamChat(text) {
       buffer += newData;
       const lines = buffer.split('\n');
       buffer = lines.pop();
-
       for (const line of lines) {
         if (line.startsWith('data: ')) {
           try {
@@ -726,8 +958,11 @@ async function streamChat(text) {
               scrollToBottom();
             }
             if (data.error) {
-              fullContent += '\u274c ' + data.error;
+              fullContent += '❌ ' + data.error;
               bubble.innerHTML = formatContent(fullContent);
+            }
+            if (data.done) {
+              // Stream complete
             }
           } catch (e) {}
         }
@@ -735,61 +970,30 @@ async function streamChat(text) {
     };
 
     xhr.onload = function() {
-      // 处理剩余buffer
-      if (buffer.startsWith('data: ')) {
-        try {
-          const data = JSON.parse(buffer.slice(6));
-          if (data.content) {
-            fullContent += data.content;
-            bubble.innerHTML = formatContent(fullContent);
-          }
-        } catch (e) {}
-      }
       if (!fullContent) {
-        // 流式失败，降级到同步接口
-        fetch('/api/chat/sync', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
-        }).then(r => r.json()).then(data => {
-          bubble.innerHTML = formatContent(data.reply || '收到空回复，请重试');
-          scrollToBottom();
-        }).catch(() => {
-          bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u8fde\u63a5\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5</p>';
-        });
+        bubble.innerHTML = formatContent('收到空回复，请重试。可能大模型未配置或网络问题。');
       }
       isStreaming = false;
       document.getElementById('sendBtn').disabled = false;
     };
 
     xhr.onerror = function() {
-      // 网络错误，降级到同步接口
-      fetch('/api/chat/sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
-      }).then(r => r.json()).then(data => {
-        bubble.innerHTML = formatContent(data.reply || '收到空回复，请重试');
-        scrollToBottom();
-      }).catch(() => {
-        bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u7f51\u7edc\u9519\u8bef\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u540e\u91cd\u8bd5</p>';
-      });
+      bubble.innerHTML = '<p style="color:var(--danger);">❌ 网络错误，请检查网络后重试</p>';
       isStreaming = false;
       document.getElementById('sendBtn').disabled = false;
     };
 
     xhr.timeout = 120000;
-    xhr.send(JSON.stringify({ message: text }));
-
+    const body = JSON.stringify({ message: text, session_id: 'default', store_id: currentStoreId || null });
+    xhr.send(body);
   } catch (e) {
-    bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u8fde\u63a5\u5931\u8d25: ' + e.message + '</p>';
+    bubble.innerHTML = '<p style="color:var(--danger);">❌ 连接失败: ' + e.message + '</p>';
     isStreaming = false;
     document.getElementById('sendBtn').disabled = false;
   }
 }
 
 function formatContent(text) {
-  // Simple markdown-ish formatting
   let html = text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -806,52 +1010,36 @@ function scrollToBottom() {
   m.scrollTop = m.scrollHeight;
 }
 
-function clearChat() {
-  if (!confirm('确定清空对话？')) return;
-  document.getElementById('messages').innerHTML = `
-    <div class="welcome-screen" id="welcome">
-      <div class="welcome-logo">📊</div>
-      <div class="welcome-title">你好，我是鹿小仓</div>
-      <div class="welcome-desc">便利店经营决策Agent。直接跟我说话，或者说"你需要我做什么"。</div>
-      <div class="welcome-cards">
-        <div class="welcome-card" onclick="sendQuick('帮我做一次广安店的运营诊断')">
-          <div class="wc-icon">📋</div><div class="wc-title">运营诊断</div>
-          <div class="wc-desc">分析销售趋势、品类贡献、滞销品</div>
-        </div>
-        <div class="welcome-card" onclick="sendQuick('我要采集竞品价格')">
-          <div class="wc-icon">🔍</div><div class="wc-title">竞品采集</div>
-          <div class="wc-desc">打开美团店铺页，我自动采集商品价格</div>
-        </div>
-        <div class="welcome-card" onclick="sendQuick('扫描广安购物中心周边商圈')">
-          <div class="wc-icon">📍</div><div class="wc-title">商圈扫描</div>
-          <div class="wc-desc">输入地址，扫描周边POI和竞品分布</div>
-        </div>
-        <div class="welcome-card" onclick="sendQuick('广安店和财富店对比分析')">
-          <div class="wc-icon">⚖️</div><div class="wc-title">门店对比</div>
-          <div class="wc-desc">对比两家店的SKU、品类、毛利结构</div>
-        </div>
-      </div>
-    </div>`;
-  hasMessages = false;
-  // Note: server-side history is kept, this only clears UI
+async function loadHistory() {
+  try {
+    const resp = await api('/api/conversations?limit=30');
+    const data = await resp.json();
+    if (data.messages && data.messages.length > 0) {
+      document.getElementById('welcome').style.display = 'none';
+      hasMessages = true;
+      for (const msg of data.messages) {
+        addMessage(msg.role, msg.content, false);
+      }
+      scrollToBottom();
+    }
+  } catch (e) {
+    console.error('Failed to load history:', e);
+  }
 }
 
 // ===== Config =====
-function openConfig() {
+async function openConfig() {
   document.getElementById('configModal').classList.add('show');
-  // Load current config
-  fetch('/api/config').then(r => r.json()).then(data => {
-    document.getElementById('cfgProvider').value = data.provider || 'zhipu';
+  try {
+    const resp = await api('/api/config');
+    const data = await resp.json();
+    document.getElementById('cfgProvider').value = data.provider || 'volcengine';
     document.getElementById('cfgBaseUrl').value = data.base_url || '';
     document.getElementById('cfgModel').value = data.model || '';
     document.getElementById('cfgApiKey').placeholder = data.api_key_set ? '已设置（输入新值覆盖）' : 'sk-...';
-  });
+  } catch (e) {}
 }
-
-function closeConfig() {
-  document.getElementById('configModal').classList.remove('show');
-}
-
+function closeConfig() { document.getElementById('configModal').classList.remove('show'); }
 function onProviderChange() {
   const provider = document.getElementById('cfgProvider').value;
   const presets = {
@@ -867,7 +1055,6 @@ function onProviderChange() {
     document.getElementById('cfgModel').value = p.model;
   }
 }
-
 async function saveConfig() {
   const data = {
     provider: document.getElementById('cfgProvider').value,
@@ -875,21 +1062,32 @@ async function saveConfig() {
     base_url: document.getElementById('cfgBaseUrl').value || null,
     model: document.getElementById('cfgModel').value || null,
   };
-  const resp = await fetch('/api/config', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  const result = await resp.json();
-  if (result.ok) {
-    closeConfig();
-    location.reload();
-  } else {
-    alert('保存失败: ' + (result.message || ''));
-  }
+  try {
+    const resp = await api('/api/config', { method: 'PUT', body: JSON.stringify(data) });
+    const result = await resp.json();
+    if (result.ok) { closeConfig(); location.reload(); }
+    else { alert('保存失败: ' + (result.message || '')); }
+  } catch (e) { alert('保存失败: ' + e.message); }
 }
 
-// ===== Start =====
+// ===== Init =====
+async function init() {
+  if (token) {
+    // Verify token
+    try {
+      const resp = await api('/api/auth/me');
+      if (resp.ok) {
+        await afterLogin();
+        return;
+      }
+    } catch (e) {}
+  }
+  // Token invalid or missing
+  token = '';
+  localStorage.removeItem('lxc_token');
+  showAuthScreen();
+}
+
 init();
 </script>
 </body>
