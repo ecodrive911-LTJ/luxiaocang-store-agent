@@ -552,7 +552,8 @@ body {
     <select class="store-selector" id="storeSelector" onchange="onStoreChange()">
       <option value="">选择门店</option>
     </select>
-    <button class="topbar-btn" onclick="openConfig()">⚙️ 设置</button>
+    <button class="topbar-btn" id="btnSettings" onclick="openConfig()" style="display:none;">⚙️ 设置</button>
+    <button class="topbar-btn" id="btnUsers" onclick="openUserMgmt()" style="display:none;">👥 用户</button>
     <button class="topbar-btn" onclick="logout()">🚪 登出</button>
   </div>
 </div>
@@ -716,6 +717,41 @@ body {
   </div>
 </div>
 
+<!-- ===== User Management Modal ===== -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal" style="width:560px;">
+    <h2>👥 用户管理</h2>
+    <div id="userList" style="max-height:400px;overflow-y:auto;"></div>
+    <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
+      <h3 style="font-size:14px;margin-bottom:12px;">➕ 创建新用户</h3>
+      <div class="modal-field">
+        <label>用户名</label>
+        <input type="text" id="newUserUsername" placeholder="至少2个字符">
+      </div>
+      <div class="modal-field">
+        <label>密码</label>
+        <input type="password" id="newUserPassword" placeholder="至少6个字符">
+      </div>
+      <div class="modal-field">
+        <label>显示名称</label>
+        <input type="text" id="newUserDisplayName" placeholder="如：张三">
+      </div>
+      <div class="modal-field">
+        <label>角色</label>
+        <select id="newUserRole">
+          <option value="owner">店主 (owner)</option>
+          <option value="staff">店员 (staff)</option>
+          <option value="admin">管理员 (admin)</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeUserMgmt()">关闭</button>
+      <button class="modal-btn primary" onclick="createUser()">创建用户</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Auth State =====
 let token = localStorage.getItem('lxc_token') || '';
@@ -840,6 +876,19 @@ async function afterLogin() {
     const data = await resp.json();
     currentUser = data.user;
     const stores = data.stores || [];
+
+    // 根据角色控制 UI
+    const role = currentUser.role || 'owner';
+    if (role === 'admin') {
+      document.getElementById('btnSettings').style.display = '';
+      document.getElementById('btnUsers').style.display = '';
+    } else if (role === 'owner') {
+      document.getElementById('btnSettings').style.display = '';
+      document.getElementById('btnUsers').style.display = 'none';
+    } else {
+      document.getElementById('btnSettings').style.display = 'none';
+      document.getElementById('btnUsers').style.display = 'none';
+    }
     // Update sidebar
     document.getElementById('sidebarAvatar').textContent = (currentUser.display_name || 'U')[0];
     document.getElementById('sidebarUsername').textContent = currentUser.display_name || currentUser.username;
@@ -1068,6 +1117,77 @@ async function saveConfig() {
     if (result.ok) { closeConfig(); location.reload(); }
     else { alert('保存失败: ' + (result.message || '')); }
   } catch (e) { alert('保存失败: ' + e.message); }
+}
+
+// ===== User Management (admin) =====
+async function openUserMgmt() {
+  document.getElementById('userModal').classList.add('show');
+  await loadUsers();
+}
+function closeUserMgmt() { document.getElementById('userModal').classList.remove('show'); }
+
+async function loadUsers() {
+  try {
+    const resp = await api('/api/users');
+    const data = await resp.json();
+    const list = document.getElementById('userList');
+    list.innerHTML = '';
+    for (const u of data.users) {
+      const roleLabel = {admin:'管理员', owner:'店主', staff:'店员'}[u.role] || u.role;
+      const roleColor = {admin:'var(--danger)', owner:'var(--accent)', staff:'var(--text-dim)'}[u.role] || 'var(--text-dim)';
+      const div = document.createElement('div');
+      div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;';
+      div.innerHTML = `
+        <div>
+          <strong>${u.display_name || u.username}</strong> 
+          <span style="color:var(--text-faint);">@${u.username}</span>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <span style="color:${roleColor};font-size:12px;padding:2px 8px;border:1px solid ${roleColor};border-radius:12px;">${roleLabel}</span>
+          <select onchange="changeUserRole('${u.id}', this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:inherit;">
+            <option value="" ${u.role}>${roleLabel}</option>
+            <option value="admin">管理员</option>
+            <option value="owner">店主</option>
+            <option value="staff">店员</option>
+          </select>
+        </div>
+      `;
+      list.appendChild(div);
+    }
+  } catch (e) {
+    document.getElementById('userList').innerHTML = '<p style="color:var(--danger);">加载失败: ' + e.message + '</p>';
+  }
+}
+
+async function changeUserRole(userId, role) {
+  if (!role) return;
+  try {
+    const resp = await api(`/api/users/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+    const data = await resp.json();
+    if (data.ok) { await loadUsers(); }
+    else { alert('修改失败: ' + (data.detail || '')); }
+  } catch (e) { alert('修改失败: ' + e.message); }
+}
+
+async function createUser() {
+  const username = document.getElementById('newUserUsername').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const display_name = document.getElementById('newUserDisplayName').value.trim();
+  const role = document.getElementById('newUserRole').value;
+  if (!username || !password) { alert('请填写用户名和密码'); return; }
+  try {
+    const resp = await api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, display_name: display_name || undefined, role }),
+    });
+    const data = await resp.json();
+    if (data.ok) {
+      document.getElementById('newUserUsername').value = '';
+      document.getElementById('newUserPassword').value = '';
+      document.getElementById('newUserDisplayName').value = '';
+      await loadUsers();
+    } else { alert('创建失败: ' + (data.detail || '')); }
+  } catch (e) { alert('创建失败: ' + e.message); }
 }
 
 // ===== Init =====
