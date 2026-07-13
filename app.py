@@ -153,7 +153,8 @@ def db_query(sql, params=(), fetch="all"):
         rows = c.fetchall()
         result = [dict(r) for r in rows]
     elif fetch == "one":
-        result = dict(c.fetchone()) if c.fetchone() else None
+        row = c.fetchone()
+        result = dict(row) if row else None
     else:
         result = c.rowcount
     conn.commit()
