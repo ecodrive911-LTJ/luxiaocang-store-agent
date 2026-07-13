@@ -739,8 +739,8 @@ body {
       <div class="modal-field">
         <label>角色</label>
         <select id="newUserRole">
-          <option value="owner">店主 (owner)</option>
-          <option value="staff">店员 (staff)</option>
+          <option value="store_owner">分店店主 (store_owner)</option>
+          <option value="manager">总部管理 (manager)</option>
           <option value="admin">管理员 (admin)</option>
         </select>
       </div>
@@ -878,11 +878,11 @@ async function afterLogin() {
     const stores = data.stores || [];
 
     // 根据角色控制 UI
-    const role = currentUser.role || 'owner';
+    const role = currentUser.role || 'store_owner';
     if (role === 'admin') {
       document.getElementById('btnSettings').style.display = '';
       document.getElementById('btnUsers').style.display = '';
-    } else if (role === 'owner') {
+    } else if (role === 'manager') {
       document.getElementById('btnSettings').style.display = '';
       document.getElementById('btnUsers').style.display = 'none';
     } else {
@@ -892,7 +892,7 @@ async function afterLogin() {
     // Update sidebar
     document.getElementById('sidebarAvatar').textContent = (currentUser.display_name || 'U')[0];
     document.getElementById('sidebarUsername').textContent = currentUser.display_name || currentUser.username;
-    document.getElementById('sidebarRole').textContent = currentUser.role === 'owner' ? '店主' : currentUser.role;
+    document.getElementById('sidebarRole').textContent = {admin:'管理员', manager:'总部管理', store_owner:'分店店主'}[currentUser.role] || currentUser.role;
     // Populate store selector
     const sel = document.getElementById('storeSelector');
     sel.innerHTML = '<option value="">选择门店</option>';
@@ -1133,8 +1133,8 @@ async function loadUsers() {
     const list = document.getElementById('userList');
     list.innerHTML = '';
     for (const u of data.users) {
-      const roleLabel = {admin:'管理员', owner:'店主', staff:'店员'}[u.role] || u.role;
-      const roleColor = {admin:'var(--danger)', owner:'var(--accent)', staff:'var(--text-dim)'}[u.role] || 'var(--text-dim)';
+      const roleLabel = {admin:'管理员', manager:'总部管理', store_owner:'分店店主'}[u.role] || u.role;
+      const roleColor = {admin:'var(--danger)', manager:'var(--accent)', store_owner:'var(--text-dim)'}[u.role] || 'var(--text-dim)';
       const div = document.createElement('div');
       div.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;';
       div.innerHTML = `
@@ -1147,8 +1147,8 @@ async function loadUsers() {
           <select onchange="changeUserRole('${u.id}', this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:3px 8px;font-size:12px;font-family:inherit;">
             <option value="" ${u.role}>${roleLabel}</option>
             <option value="admin">管理员</option>
-            <option value="owner">店主</option>
-            <option value="staff">店员</option>
+            <option value="manager">总部管理</option>
+            <option value="store_owner">分店店主</option>
           </select>
         </div>
       `;

@@ -1,9 +1,9 @@
 """
-鹿小仓 认证与权限模块 v0.4.1
+鹿小仓 认证与权限模块 v0.4.2
 - 密码哈希（bcrypt）
 - Session Token 生成与验证
 - FastAPI 鉴权中间件
-- RBAC 角色权限控制（admin > owner > staff）
+- RBAC 三级角色：admin / manager / store_owner
 """
 
 import secrets
@@ -25,25 +25,35 @@ DB_PATH = Path(__file__).parent / "database.db"
 SESSION_TTL = 7 * 24 * 3600  # 7天
 
 # ===== 角色权限定义 =====
+# 三层架构：
+#   admin      — 系统管理员（鹿总）：全权限，包括后台配置、系统设置、用户管理
+#   manager    — 总部管理人员：能看所有门店数据、能做分析工作、能录入数据，但不能改后台配置和系统级设置
+#   store_owner — 分店店主：只能看和录入自己门店的数据，看不到别的门店
 ROLES = {
     "admin": {
         "level": 100,
-        "label": "系统管理员",
-        "permissions": ["*"],  # 所有权限
+        "label": "管理员",
+        "permissions": ["*"],
     },
-    "owner": {
+    "manager": {
         "level": 50,
-        "label": "店主",
+        "label": "总部管理",
         "permissions": [
-            "chat", "view_data", "view_stores", "manage_stores",
-            "view_config", "edit_config", "register_user",
+            "chat",                    # 对话
+            "view_data",               # 查看数据
+            "view_all_stores",         # 查看所有门店
+            "input_data",              # 录入数据
+            "view_config",             # 查看配置（只读）
+            "run_analysis",            # 运行分析脚本
         ],
     },
-    "staff": {
+    "store_owner": {
         "level": 10,
-        "label": "店员",
+        "label": "分店店主",
         "permissions": [
-            "chat", "view_data", "view_stores",
+            "chat",                    # 对话
+            "view_data",               # 查看自己门店数据
+            "input_data",              # 录入自己门店数据
         ],
     },
 }
@@ -163,29 +173,63 @@ def invalidate_session(db_path: Path, token: str):
 
 # ===== 门店权限 =====
 def get_user_stores(db_path: Path, user_id: str) -> list:
+    """获取用户可访问的门店列表
+    - admin 和 manager 能看所有门店
+    - store_owner 只能看绑定的门店
+    """
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    rows = conn.execute(
-        """SELECT s.id, s.name, s.address, s.city, s.district, us.role as user_role
-           FROM stores s
-           JOIN user_stores us ON s.id = us.store_id
-           WHERE us.user_id = ?
-           ORDER BY s.name""",
-        (user_id,)
-    ).fetchall()
+
+    # 先查用户角色
+    user_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user_row:
+        conn.close()
+        return []
+    role = user_row["role"]
+
+    if role in ("admin", "manager"):
+        # 能看所有门店
+        rows = conn.execute(
+            """SELECT s.id, s.name, s.address, s.city, s.district, 'all' as user_role
+               FROM stores s ORDER BY s.name"""
+        ).fetchall()
+    else:
+        # 只能看绑定的门店
+        rows = conn.execute(
+            """SELECT s.id, s.name, s.address, s.city, s.district, us.role as user_role
+               FROM stores s
+               JOIN user_stores us ON s.id = us.store_id
+               WHERE us.user_id = ?
+               ORDER BY s.name""",
+            (user_id,)
+        ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 def get_store_by_id(db_path: Path, store_id: str, user_id: str) -> Optional[dict]:
+    """获取门店信息（验证用户权限）
+    - admin/manager：能访问任意门店
+    - store_owner：只能访问绑定的门店
+    """
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
-    row = conn.execute(
-        """SELECT s.*, us.role as user_role
-           FROM stores s
-           JOIN user_stores us ON s.id = us.store_id
-           WHERE s.id = ? AND us.user_id = ?""",
-        (store_id, user_id)
-    ).fetchone()
+
+    user_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    if not user_row:
+        conn.close()
+        return None
+    role = user_row["role"]
+
+    if role in ("admin", "manager"):
+        row = conn.execute("SELECT * FROM stores WHERE id = ?", (store_id,)).fetchone()
+    else:
+        row = conn.execute(
+            """SELECT s.*, us.role as user_role
+               FROM stores s
+               JOIN user_stores us ON s.id = us.store_id
+               WHERE s.id = ? AND us.user_id = ?""",
+            (store_id, user_id)
+        ).fetchone()
     conn.close()
     return dict(row) if row else None
 

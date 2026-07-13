@@ -261,7 +261,7 @@ class RegisterRequest(BaseModel):
     password: str
     display_name: str = None
     phone: str = None
-    role: str = "owner"  # admin 可指定 role
+    role: str = "store_owner"  # admin 可指定角色
 
 class LoginRequest(BaseModel):
     username: str
@@ -274,7 +274,7 @@ class StoreRequest(BaseModel):
     district: str = None
 
 class UserRoleRequest(BaseModel):
-    role: str  # admin / owner / staff
+    role: str  # admin / manager / store_owner
 
 
 # ===== 认证接口 =====
@@ -297,8 +297,8 @@ async def register(req: RegisterRequest, request: Request):
         allow_reg = config.get("auth", {}).get("allow_registration", "true") == "true"
         if not allow_reg:
             raise HTTPException(status_code=403, detail="注册已关闭，请联系管理员")
-        # 公开注册只能是 owner
-        if req.role != "owner":
+        # 公开注册只能是 store_owner
+        if req.role != "store_owner":
             raise HTTPException(status_code=403, detail="无权创建该角色用户")
 
     # 验证角色合法性
@@ -395,8 +395,8 @@ async def list_stores(user: dict = Depends(require_auth)):
     return {"stores": stores}
 
 @app.post("/api/stores")
-async def create_store(req: StoreRequest, user: dict = Depends(require_permission("manage_stores"))):
-    """添加门店（需要 manage_stores 权限）"""
+async def create_store(req: StoreRequest, user: dict = Depends(require_role("admin"))):
+    """添加门店（仅 admin）"""
     store_id = str(uuid.uuid4())
     now = time.time()
     db_exec(
@@ -420,8 +420,8 @@ async def create_store(req: StoreRequest, user: dict = Depends(require_permissio
     }
 
 @app.put("/api/stores/{store_id}")
-async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(require_permission("manage_stores"))):
-    """修改门店（需要 manage_stores 权限）"""
+async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(require_role("admin"))):
+    """修改门店（仅 admin）"""
     store = get_store_by_id(DB_PATH, store_id, user["user_id"])
     if not store:
         raise HTTPException(status_code=404, detail="门店不存在或无权限")
@@ -432,8 +432,8 @@ async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(re
     return {"ok": True}
 
 @app.delete("/api/stores/{store_id}")
-async def delete_store(store_id: str, user: dict = Depends(require_permission("manage_stores"))):
-    """删除门店（需要 manage_stores 权限）"""
+async def delete_store(store_id: str, user: dict = Depends(require_role("admin"))):
+    """删除门店（仅 admin）"""
     store = get_store_by_id(DB_PATH, store_id, user["user_id"])
     if not store:
         raise HTTPException(status_code=404, detail="门店不存在或无权限")
@@ -566,8 +566,8 @@ async def conversations(session_id: str = "default", limit: int = 50, user: dict
     return {"messages": rows}
 
 @app.get("/api/config")
-async def get_config(user: dict = Depends(require_auth)):
-    """获取配置（需要登录）"""
+async def get_config(user: dict = Depends(require_permission("view_config"))):
+    """获取配置（需要 view_config 权限）"""
     cfg = load_config()
     llm = cfg.get("llm", {})
     return {
