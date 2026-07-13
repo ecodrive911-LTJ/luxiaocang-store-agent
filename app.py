@@ -19,7 +19,8 @@ from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, register_tool, TOOLS
 from auth import (
     hash_password, verify_password, create_session, verify_session,
-    invalidate_session, get_user_stores, get_store_by_id, extract_token
+    invalidate_session, get_user_stores, get_store_by_id, extract_token,
+    require_role, require_permission, has_permission, ROLES
 )
 
 # ===== Paths =====
@@ -260,6 +261,7 @@ class RegisterRequest(BaseModel):
     password: str
     display_name: str = None
     phone: str = None
+    role: str = "owner"  # admin 可指定 role
 
 class LoginRequest(BaseModel):
     username: str
@@ -271,21 +273,43 @@ class StoreRequest(BaseModel):
     city: str = None
     district: str = None
 
+class UserRoleRequest(BaseModel):
+    role: str  # admin / owner / staff
+
 
 # ===== 认证接口 =====
 @app.post("/api/auth/register")
-async def register(req: RegisterRequest):
-    """用户注册"""
-    allow_reg = config.get("auth", {}).get("allow_registration", "true") == "true"
-    if not allow_reg:
-        raise HTTPException(status_code=403, detail="注册已关闭")
+async def register(req: RegisterRequest, request: Request):
+    """用户注册
+    - 公开注册（allow_registration=true）：只能注册 owner 角色
+    - admin 登录时注册：可指定任意角色
+    """
+    # 判断是否有 admin token（admin 主动创建用户）
+    token = extract_token(request)
+    creator_is_admin = False
+    if token:
+        creator = verify_session(DB_PATH, token)
+        if creator and creator["role"] == "admin":
+            creator_is_admin = True
+
+    # 非admin注册需要检查是否开放注册
+    if not creator_is_admin:
+        allow_reg = config.get("auth", {}).get("allow_registration", "true") == "true"
+        if not allow_reg:
+            raise HTTPException(status_code=403, detail="注册已关闭，请联系管理员")
+        # 公开注册只能是 owner
+        if req.role != "owner":
+            raise HTTPException(status_code=403, detail="无权创建该角色用户")
+
+    # 验证角色合法性
+    if req.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"无效角色，可选: {', '.join(ROLES.keys())}")
 
     if len(req.username) < 2:
         raise HTTPException(status_code=400, detail="用户名至少2个字符")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="密码至少6个字符")
 
-    # 检查用户名是否已存在
     existing = db_query("SELECT id FROM users WHERE username = ?", (req.username,), fetch="one")
     if existing:
         raise HTTPException(status_code=409, detail="用户名已存在")
@@ -294,9 +318,23 @@ async def register(req: RegisterRequest):
     now = time.time()
     db_exec(
         "INSERT INTO users (id, username, password_hash, display_name, phone, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (user_id, req.username, hash_password(req.password), req.display_name, req.phone, "owner", now, now)
+        (user_id, req.username, hash_password(req.password), req.display_name, req.phone, req.role, now, now)
     )
 
+    # 如果是admin创建用户，不自动登录，返回用户信息
+    if creator_is_admin:
+        return {
+            "ok": True,
+            "message": f"用户 {req.username} 创建成功",
+            "user": {
+                "id": user_id,
+                "username": req.username,
+                "display_name": req.display_name or req.username,
+                "role": req.role,
+            }
+        }
+
+    # 公开注册自动登录
     token = create_session(DB_PATH, user_id)
     return {
         "ok": True,
@@ -306,7 +344,7 @@ async def register(req: RegisterRequest):
             "id": user_id,
             "username": req.username,
             "display_name": req.display_name or req.username,
-            "role": "owner",
+            "role": req.role,
         }
     }
 
@@ -357,8 +395,8 @@ async def list_stores(user: dict = Depends(require_auth)):
     return {"stores": stores}
 
 @app.post("/api/stores")
-async def create_store(req: StoreRequest, user: dict = Depends(require_auth)):
-    """添加门店"""
+async def create_store(req: StoreRequest, user: dict = Depends(require_permission("manage_stores"))):
+    """添加门店（需要 manage_stores 权限）"""
     store_id = str(uuid.uuid4())
     now = time.time()
     db_exec(
@@ -382,8 +420,8 @@ async def create_store(req: StoreRequest, user: dict = Depends(require_auth)):
     }
 
 @app.put("/api/stores/{store_id}")
-async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(require_auth)):
-    """修改门店"""
+async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(require_permission("manage_stores"))):
+    """修改门店（需要 manage_stores 权限）"""
     store = get_store_by_id(DB_PATH, store_id, user["user_id"])
     if not store:
         raise HTTPException(status_code=404, detail="门店不存在或无权限")
@@ -394,14 +432,38 @@ async def update_store(store_id: str, req: StoreRequest, user: dict = Depends(re
     return {"ok": True}
 
 @app.delete("/api/stores/{store_id}")
-async def delete_store(store_id: str, user: dict = Depends(require_auth)):
-    """删除门店"""
+async def delete_store(store_id: str, user: dict = Depends(require_permission("manage_stores"))):
+    """删除门店（需要 manage_stores 权限）"""
     store = get_store_by_id(DB_PATH, store_id, user["user_id"])
     if not store:
         raise HTTPException(status_code=404, detail="门店不存在或无权限")
     db_exec("DELETE FROM user_stores WHERE store_id=?", (store_id,))
     db_exec("DELETE FROM stores WHERE id=?", (store_id,))
     return {"ok": True}
+
+
+# ===== 用户管理接口（admin only）=====
+@app.get("/api/users")
+async def list_users(user: dict = Depends(require_role("admin"))):
+    """获取所有用户列表（仅 admin）"""
+    rows = db_query("SELECT id, username, display_name, phone, role, created_at FROM users ORDER BY created_at", fetch="all")
+    return {"users": rows}
+
+@app.put("/api/users/{user_id}/role")
+async def update_user_role(user_id: str, req: UserRoleRequest, user: dict = Depends(require_role("admin"))):
+    """修改用户角色（仅 admin）"""
+    if req.role not in ROLES:
+        raise HTTPException(status_code=400, detail=f"无效角色，可选: {', '.join(ROLES.keys())}")
+    target = db_query("SELECT id FROM users WHERE id = ?", (user_id,), fetch="one")
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    db_exec("UPDATE users SET role = ?, updated_at = ? WHERE id = ?", (req.role, time.time(), user_id))
+    return {"ok": True, "message": f"用户角色已更新为 {ROLES[req.role]['label']}"}
+
+@app.get("/api/roles")
+async def list_roles(user: dict = Depends(require_auth)):
+    """获取角色列表"""
+    return {"roles": {k: {"label": v["label"], "level": v["level"]} for k, v in ROLES.items()}}
 
 
 # ===== 业务接口（改造现有接口）=====
@@ -517,8 +579,8 @@ async def get_config(user: dict = Depends(require_auth)):
     }
 
 @app.put("/api/config")
-async def update_config(req: ConfigRequest, user: dict = Depends(require_auth)):
-    """更新配置（需要登录）"""
+async def update_config(req: ConfigRequest, user: dict = Depends(require_role("admin"))):
+    """更新配置（仅 admin）"""
     cfg = load_config()
     if "llm" not in cfg:
         cfg["llm"] = {}
@@ -552,12 +614,12 @@ def migrate_default_user():
     if count and count["c"] > 0:
         return  # 已有用户，跳过
 
-    print("[迁移] 首次升级，创建默认用户 luxiaocang...")
+    print("[迁移] 首次升级，创建默认管理员 luxiaocang...")
     user_id = str(uuid.uuid4())
     now = time.time()
     db_exec(
         "INSERT INTO users (id, username, password_hash, display_name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (user_id, "luxiaocang", hash_password("LXC2025"), "鹿小仓", "owner", now, now)
+        (user_id, "luxiaocang", hash_password("LXC2025"), "鹿小仓管理员", "admin", now, now)
     )
 
     # 创建两个门店
@@ -578,7 +640,7 @@ def migrate_default_user():
     # 给现有对话记录打上 user_id
     db_exec("UPDATE conversations SET user_id = ?", (user_id,))
 
-    print(f"[迁移] 完成。用户: luxiaocang, 门店: 广安店({store1_id[:8]}), 财富店({store2_id[:8]})")
+    print(f"[迁移] 完成。管理员: luxiaocang(admin), 门店: 广安店({store1_id[:8]}), 财富店({store2_id[:8]})")
 
 migrate_default_user()
 
