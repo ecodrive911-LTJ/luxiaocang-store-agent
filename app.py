@@ -207,7 +207,7 @@ def init_db():
         ai_confidence REAL,
         FOREIGN KEY (task_id) REFERENCES collect_tasks(id),
         FOREIGN KEY (store_id) REFERENCES stores(id)
-    )"""
+    )""")
 
     # 对标商品清单（系统级商品基准库）
     c.execute("""CREATE TABLE IF NOT EXISTS benchmark_products (
