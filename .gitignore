@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Logs
+*.log
+logs/
+
+# Data
+*.db
+*.sqlite
+*.xlsx
+*.csv
+data/*.json
+data/*.csv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Deployment
+*.zip
+deploy*.py
+前端修复*.md
+性能优化*.md
+
+# Temp
+*.tmp
+*.bak

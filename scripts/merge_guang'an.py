@@ -1,0 +1,425 @@
+# -*- coding: utf-8 -*-
+"""
+鹿小仓广安店 - 库存合并
+鹿小仓2.xlsx = 真实库存（基准），3614条
+鹿小仓广安购物中心.xlsx = 采购价来源（"库存"列实际存的是采购价），13230条
+合并：以鹿小仓2为准，匹配采购价，计算毛利和加价率
+"""
+import pandas as pd, re, os
+from pathlib import Path
+
+OUT_DIR = Path(r"C:\Users\13522\Desktop\鹿小仓广安店")
+OUT_XLSX = OUT_DIR / "鹿小仓广安店_库存合并总表.xlsx"
+
+# ── 分类关键词 ──
+CAT_KW = {
+    "酒水饮料": ["矿泉水","纯净水","可乐","果汁","奶茶","牛奶","酸奶","豆奶","啤酒","白酒","红酒","茶饮","咖啡","椰子","功能饮料","运动饮料","苏打","气泡","饮用水","饮料","AD钙","蒙牛","伊利","光明","三元","味全","汇源","农夫山泉","怡宝","百岁山","可口可乐","雪碧","红牛","东鹏","元气森林","阿萨姆","立顿","维他奶","康师傅","统一","王老吉","加多宝","椰树","六个核桃","养元","旺仔","青岛啤酒","雪花","哈尔滨","百威","嘉士伯","喜力","科罗娜","1664","乌苏","燕京","珠江","二锅头","汾酒","泸州老窖","五粮液","茅台","剑南春","江小白","牛栏山","红星","劲酒","椰子水","气泡水","精酿","原浆","清酒","梅酒","果酒","米酒","预调","鸡尾酒","竹叶青","洋河","古井贡","舍得","水井坊","习酒","郎酒","董酒","大窑","北冰洋","崂山","巴黎水","冰红茶","绿茶","乌龙茶","茉莉","柠檬茶","鸭屎香","茶π","小茗同学","维他","美年达","七喜","芬达","花生牛奶","风味乳","常温奶","鲜奶","乳酸菌","纯牛奶","能量饮料","电解质","维生素水","蜂蜜柚子","含气","活菌","巴氏","每日鲜语","脱脂奶","蒙特泉"],
+    "粮油调味": ["大米","面粉","面条","挂面","食用油","酱油","醋","调味","料酒","蚝油","番茄酱","辣椒酱","豆瓣酱","芝麻油","花椒","八角","桂皮","香辛","食盐","白糖","红糖","冰糖","蜂蜜","果酱","花生酱","沙拉酱","蛋黄酱","味精","鸡精","火锅底料","汤料","卤料","紫菜","海带","虾皮","木耳","菌菇","腐竹","豆腐皮","粉丝","粉条","米线","通心粉","麦片","燕麦片","八宝粥","罐头","腊肉","火腿","香肠","咸鸭蛋","皮蛋","松花蛋","菜籽油","花生油","调和油","橄榄油","玉米油","葵花","芝麻酱","拌饭","下饭","榨菜","泡菜","酸菜","梅菜","豆豉","陈皮","枸杞","红枣","桂圆","干货","杂粮","粗粮","黄豆","绿豆","红豆","小米","糯米","糙米","黑米","藜麦","荞麦","玉米面","淀粉","泡打粉","酵母","香菇","银耳","竹荪","龙口","红薯粉","土豆粉","宽粉","年糕","米粉","方便面","老干妈","腐乳","鱼露","虾酱","蟹酱","鲍鱼汁","蒸鱼豉油","陈醋","香醋","白醋","米醋","藤椒","辣椒油","红油","油泼辣子","剁椒","蒜蓉","调味料","调味品","香辣","麻辣","五香","十三香","孜然","小茴","草果","干姜","罗汉果","山楂干","话梅","酸梅","乌梅","青梅","果干","芒果干","葡萄干","桂圆干","荔枝干","瓜子","花生","葵花籽","松子","夏威夷果","碧根果","开心果","腰果","核桃","巴旦木","榛子","栗子","蜜枣","椰枣","藕粉","马蹄","荸荠","笋干","梅干菜","干豆角","韭菜酱","郫县豆瓣","芝麻香油","芥末油","青芥末","毛尖绿茶","小种红茶"],
+    "休闲零食": ["薯片","饼干","糕点","蛋糕","面包","威化","曲奇","沙琪玛","月饼","麻花","锅巴","米饼","海苔","坚果","核桃仁","蜜饯","果冻","布丁","糖果","棒棒糖","口香糖","泡泡糖","薄荷糖","巧克力","派","蛋酥","肉脯","肉松","牛肉干","猪肉脯","鸭脖","鸭舌","鱼仔","鱼豆腐","鱿鱼","虾条","仙贝","雪饼","豆干","辣条","魔芋爽","膨化","干脆面","素肉","卤味","鹌鹑蛋","冻干","果蔬干","红薯条","奶酪球","芝士","爆米花","果蔬脆","鱼丸","海味","零食","小食","雪糕","冰淇淋","冰棒","火腿肠","烤肠","玉米肠","魔芋","豆制品","豆卷","素牛排","面筋","烤麸","凉皮","魔芋丝","魔芋结","海带结","即食","酥脆","夹心","蛋卷","蛋筒","米果","米通","软糖","硬糖","奶糖","酥糖","花生糖","芝麻糖","麦芽糖","棉花糖","牛轧糖","杏仁饼","凤梨酥","绿豆糕","老婆饼","核桃酥","花生酥","芝麻酥","蛋黄派","巧克力派","草莓派","蜜桃乌龙","红豆薏米","爽口梅脆"],
+    "日化清洁": ["洗衣液","洗衣粉","洗衣皂","洗洁精","柔顺剂","漂白","洁厕","管道","除垢","垃圾袋","保鲜膜","铝箔","湿巾","纸巾","抽纸","卷纸","面巾","手帕纸","厨房用纸","卫生纸","卫生巾","护垫","棉条","洗发水","护发素","发膜","护发","染发","弹力素","定型","沐浴露","香皂","洗手液","身体乳","润肤","护手霜","洁面","去屑","柔顺","除菌","除螨","清洁剂","去污","去油","疏通","活性炭","竹炭","纸尿裤","拉拉裤","棉柔","柔纸","牙膏","牙刷","漱口水","牙线","牙签","棉签","化妆棉","洗脸巾","一次性毛巾","浴巾","搓澡巾","拖把","扫帚","抹布","百洁布","钢丝球","海绵擦","刮水","玻璃刮","除尘掸","垃圾桶","保鲜袋","密封袋","真空袋","收纳袋","收纳箱","收纳盒","整理箱","挂钩","粘钩","置物架","菜板","砧板","刀具","刀架","餐具","锅具","水壶","保温壶","水杯","茶杯","餐盒","饭盒","便当盒","调味盒","油壶","密封罐","保鲜盒","打蛋器","量杯","烘焙","模具","硅油纸","烘焙纸","锡纸","蒸笼布","硅胶垫","擀面杖","刮刀","铲子","汤勺","漏勺"],
+    "日用百货": ["毛巾","浴巾","方巾","枕套","枕芯","被套","床单","床垫","被子","毛毯","夏凉被","四件套","三件套","收纳","衣架","晾衣","簸箕","水桶","脸盆","拖鞋","雨伞","雨衣","保温杯","玻璃杯","筷子","勺子","碗","盘子","刀叉","菜刀","水果刀","炒锅","汤锅","奶锅","蒸锅","平底锅","热水袋","暖宝宝","蚊帐","枕巾","床品","坐垫","靠垫","沙发垫","桌布","围裙","袖套","家居","晾晒","缝纫","针线","油瓶","酱料瓶","调料盒","收纳箱","整理箱","脏衣篓","肥皂盒","牙刷架","杯架","防滑垫","地垫","门垫","淋浴","花洒","水龙头","地漏","马桶盖","马桶垫","皂液器","打包","包装","封口","密封","饭碗","汤碗","碟子","餐盘","一次性","台布","杯垫","锅垫","隔热垫","防烫","隔热","防滑","门帘","窗帘","窗纱","遮光","防晒","挂钩","挂杆","挂架","晾晒绳","晾衣杆","晾衣架","落地架","折叠架","伸缩杆","撑杆","窗帘杆","浴帘杆","毛巾杆","毛巾架","层架","角架","转角架","门后架","门挂","门钩","收纳挂","挂袋","压缩袋","家居日用","百货","杂货","五金","TT梳","气囊梳","顺发梳","假发","发网","发卡","发圈","头绳","皮筋"],
+    "个护美妆": ["防晒霜","隔离霜","粉底液","气垫","BB霜","CC霜","遮瑕","散粉","定妆","口红","唇釉","唇膏","唇彩","眼影","眼线","睫毛膏","眉笔","腮红","修容","高光","卸妆","面膜","面霜","精华液","精华","乳液","爽肤水","润肤露","美白","抗皱","祛斑","祛痘","控油","保湿","补水","指甲油","美甲","假睫毛","双眼皮","修眉刀","脱毛","剃须刀","刮毛","化妆棉","美妆","美容仪","洁面仪","润唇膏","护唇","护肤","眼霜","颈霜","香水","香氛","香体","走珠","止汗","喷雾","发胶","发蜡","发泥","定型喷雾","染发剂","焗油","倒膜","头皮精华","生发","防脱","育发","护发精油","洗护套装","卸妆水","卸妆油","卸妆膏","洁面乳","洗面奶","去角质","磨砂膏","收敛水","柔肤水","化妆水","抗氧化","抗衰老","紧致","提拉","淡纹","眼袋","手膜","足膜","护足","防裂","唇膜","口腔","口气","漱口水","牙贴","美白牙贴","牙缝刷","舌刮","口气清新","梳子","顺发","假发护理液","王妃同款","按摩梳","便携梳"],
+    "速食冷冻": ["方便面","自热","螺蛳粉","酸辣粉","拌面","速食","冷冻","冰棒","雪糕","冰淇淋","冷饮","速冻","水饺","汤圆","馄饨","包子","馒头","花卷","烧麦","手抓饼","葱油饼","煎饼","春卷","糯米","粽子","即食","预制菜","半成品","便当","饭团","寿司","热干面","南昌拌粉","过桥米线","红油","凉拌","速食粥","自热火锅","自热米饭","方便粉丝","杯面","桶面","袋装面","干脆面","冷冻肉","鸡腿","鸡翅","牛排","鸡胸肉","冻品","冷鲜","速冻面点","即食鸡胸","即食牛肉","卤味","熟食","凉拌菜","素食","素肉","即食豆干","即食海带","方便食品","代餐","冲饮","藕粉","芝麻糊","核桃粉","豆浆粉","奶茶粉","咖啡粉","可可粉","冻干水果","脱水蔬菜","干制食品","肉罐头","鱼罐头","水果罐头","蔬菜罐头","微波","加热即食","开袋即食","免煮","快熟","速溶","即冲","冲泡"],
+    "数码配件": ["手机壳","手机膜","充电器","数据线","耳机","蓝牙","音箱","鼠标","键盘","U盘","存储卡","路由器","插座","排插","电池","手电筒","LED灯","灯泡","小风扇","加湿器","闹钟","电子秤","摄像头","智能手环","电动牙刷","理发器","筋膜枪","充电宝","移动电源","PD","快充","Type-C","Lightning","自拍杆","手机支架","平板支架","笔记本支架","散热器","读卡器","转接头","扩展坞","破壁机","微波炉","电饭煲","电热水壶","榨汁机","电风扇","暖风机","电暖器","小太阳","油汀","电热毯","电蚊香","电蚊拍","灭蚊灯","体重秤","厨房秤","计时器","温度计","湿度计","头灯","应急灯","护眼灯","学习灯","夜灯","感应灯","灯带","氛围灯","RGB","桌搭","电竞","手柄","方向盘","摇杆","机械键盘","静音鼠标","无线","有线","WiFi","智能家居","智能门锁","门铃","监控","安防","报警","传感器","烟雾","燃气","漏水","门磁","红外","人体","遥控","定时","插座","开关","面板","延长线","HDMI","VGA","DP","USB","网线","水晶头","扎带","魔术贴","保护膜","屏幕贴","钢化膜","防蓝光","防窥","适配器","逆变器","继电器","断路器","漏电保护","空气开关","保险丝"],
+    "服饰箱包": ["T恤","衬衫","卫衣","外套","羽绒服","棉服","马甲","背心","裤子","牛仔裤","休闲裤","短裤","半身裙","连衣裙","内衣","内裤","文胸","袜子","丝袜","运动鞋","凉鞋","靴子","拖鞋","背包","手提包","钱包","皮带","帽子","围巾","手套","眼镜","太阳镜","项链","耳环","手镯","戒指","手表","高跟","粗跟","帆布","腰包","斜挎","雨鞋","发圈","发夹","头绳","皮筋","冰丝","防晒衣","遮阳帽","墨镜","冰袖","袖套","防晒面罩","防晒口罩","遮阳伞","雨伞","晴雨伞","折叠伞","自动伞","瑜伽垫","健身垫","泡沫轴","阻力带","弹力带","跳绳","哑铃","壶铃","健腹轮","俯卧撑","拉力器","握力器","护腕","护膝","运动护具","速干","透气","排汗","保暖","加绒","加厚","防风","防水","防泼水","皮革","PU","PVC","硅胶","橡胶","树脂","不锈钢","钛","铝","铜","银","金","钻石","水晶","珍珠","翡翠","玉石","玛瑙"],
+    "母婴用品": ["纸尿裤","尿不湿","拉拉裤","奶瓶","奶嘴","奶粉","辅食","米粉","婴儿","宝宝","孕婴","孕妇","产妇","母乳","孕期","待产","月子","幼儿","新生儿","幼童","护臀","抚触","学步","背带","推车","安全座椅","口水巾","围嘴","隔尿垫","暖奶器","吸奶器","储奶袋","防溢乳","哺乳衣","束腹带","收腹带","骨盆带","待产包","产妇卫生巾","产褥垫","月子鞋","月子服","哺乳睡衣","防皲裂","乳头霜","按摩油","抚触油","爽身粉","痱子粉","护臀膏","紫草膏","木瓜膏","婴儿洗衣液","奶瓶清洗剂","奶瓶刷","婴儿湿巾","手口湿巾","棉柔巾","柔纸巾","儿童牙刷","儿童牙膏","辅食碗","宝宝碗"],
+    "宠物用品": ["猫粮","狗粮","宠物","猫砂","猫窝","狗窝","牵引","狗链","猫爬架","鸟食","鱼食","仓鼠","宠物玩具","梳毛","指甲剪","饮水器","喂食器","猫条","猫罐头","狗罐头","驱虫","猫抓板","逗猫棒","狗咬胶","磨牙棒","便盆","尿垫","牵引绳","胸背带","项圈","嘴套","洗毛膏","护毛素","除臭","猫砂盆","猫砂铲","自动喂食","自动饮水","活水","喷泉","滤芯","水族","鱼缸","过滤器","增氧","加热棒","造景","躲避","底材","垫材","椰土","豆腐砂","膨润土","水晶猫砂","松木","矿土","沸石","可降解","结团","除臭","抑菌","无尘","低尘","速干","吸水","除味"],
+    "消杀用品": ["蚊香","杀虫","蟑螂","灭蝇","驱蚊","花露水","消毒","酒精","棉球","创可贴","口罩","体温计","血压","血糖","膏药","贴膏","喷剂","洗剂","滴眼液","退热","感冒","止咳","消炎","止痛","碘伏","双氧水","纱布","绷带","维生素","钙片","蛋白粉","益生菌","膳食纤维","鱼油","褪黑素","氨基酸","护肝","养胃","润肠","通便","代餐","保健","营养","清凉油","风油精","驱蚊液","止痒","祛痱","爽身","痱子粉","宝宝金水","防蚊","灭蚊","电蚊香","蚊香液","蚊香片","杀虫剂","气雾剂","樟脑丸","防蛀","防霉","干燥剂","活性炭","竹炭包","空气净化","净水","滤芯","净水器"],
+    "生鲜果蔬": ["苹果","香蕉","橙子","葡萄","西瓜","哈密瓜","芒果","草莓","蓝莓","火龙果","榴莲","荔枝","龙眼","桃子","李子","杏","猕猴桃","柚子","柠檬","菠萝","蔬菜","白菜","青菜","菠菜","西红柿","黄瓜","茄子","土豆","洋葱","大蒜","生姜","辣椒","胡萝卜","芹菜","豆角","西兰花","蘑菇","金针菇","鸡蛋","鲜奶","熟食","卤味","果切","沙拉","生鲜","水果","果蔬","玉米","南瓜","冬瓜","丝瓜","苦瓜","豆芽","韭菜","生菜","空心菜","油麦菜","土鸡蛋","猪肉","牛肉","羊肉","禽肉","水产","海鲜","虾","蟹","贝","螺","蚝","海参","裙带菜","海藻"],
+    "文具办公": ["笔记本","本子","文件夹","文件袋","订书机","胶带","剪刀","尺子","橡皮","铅笔","中性笔","圆珠笔","荧光笔","马克笔","水彩笔","蜡笔","颜料","画纸","打印纸","A4","复写","便签","标签","计算器","印章","台灯","书架","笔筒","修正带","涂改","订书钉","回形针","长尾夹","燕尾夹","贺卡","明信片","贴纸","手账","胶棒","双面胶","透明胶","美纹纸","和纸胶带","手账本","日程本","计划本","备忘录","便签纸","索引贴","书签","笔袋","笔盒","文具盒","书包","画板","画架","调色盘","画笔","毛笔","钢笔","墨水","笔芯","替芯","铅芯","自动铅笔","铅笔刀","卷笔刀","削笔器","文具套装","办公文具","办公用品"],
+}
+
+def classify(name, *cats):
+    for raw_cat in cats:
+        if not raw_cat or str(raw_cat) == 'nan':
+            continue
+        raw = str(raw_cat)
+        mapping = {
+            "水饮":"酒水饮料","饮用水":"酒水饮料","乳饮酒水":"酒水饮料","酒饮":"酒水饮料","酒类":"酒水饮料","酒水":"酒水饮料",
+            "零食":"休闲零食","休闲":"休闲零食","休闲食品":"休闲零食",
+            "粮油":"粮油调味","调味":"粮油调味","粮油调味":"粮油调味",
+            "日化":"日化清洁","清洁":"日化清洁","日化清洁":"日化清洁","清洁用品":"日化清洁",
+            "百货":"日用百货","日用":"日用百货","日用百货":"日用百货","家居":"日用百货","家居日用":"日用百货",
+            "个护":"个护美妆","美妆":"个护美妆","美容":"个护美妆","个护美妆":"个护美妆","个人护理":"个护美妆",
+            "母婴":"母婴用品","母婴用品":"母婴用品",
+            "宠物":"宠物用品","宠物用品":"宠物用品",
+            "数码":"数码配件","电子":"数码配件","数码配件":"数码配件","数码家电":"数码配件",
+            "服饰":"服饰箱包","鞋包":"服饰箱包","服饰箱包":"服饰箱包","服装":"服饰箱包",
+            "生鲜":"生鲜果蔬","果蔬":"生鲜果蔬","水果":"生鲜果蔬","生鲜果蔬":"生鲜果蔬",
+            "速食":"速食冷冻","冷冻":"速食冷冻","速食冷冻":"速食冷冻","冷冻冷藏":"速食冷冻",
+            "文具":"文具办公","办公":"文具办公","文具办公":"文具办公",
+            "驱蚊":"消杀用品","消毒":"消杀用品","防暑":"消杀用品","消杀用品":"消杀用品","医疗保健":"消杀用品",
+        }
+        for k, v in mapping.items():
+            if k in raw:
+                return v
+    if not isinstance(name, str):
+        return "日用百货"
+    for cat, keywords in CAT_KW.items():
+        for kw in keywords:
+            if kw in name:
+                return cat
+    return "日用百货"
+
+def parse_price(val):
+    if val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    s = str(val).strip()
+    if not s or s == 'nan' or s == '-' or s == '—':
+        return None
+    try:
+        v = float(s)
+        if 0 < v < 100000:
+            return round(v, 2)
+    except:
+        pass
+    return None
+
+def extract_spec(name):
+    if not isinstance(name, str): return ""
+    specs = []
+    for m in re.finditer(r'(\d+(?:\.\d+)?)\s*(ml|mL|毫升|L|升|g|kg|克|千克|片|包|袋|盒|瓶|罐|条|个|支|装|枚|卷|提|张|节|粒|颗)', name, re.I):
+        specs.append(f"{m.group(1)}{m.group(2)}")
+    for m in re.finditer(r'(\d+)\s*[×x*]\s*(\d+)', name):
+        specs.append(f"{m.group(1)}x{m.group(2)}")
+    return "; ".join(dict.fromkeys(specs).keys())[:40] if specs else ""
+
+def mark_flow(price):
+    if price is None: return ""
+    if price <= 0.1: return "疑似引流"
+    elif price <= 1.0: return "可能引流"
+    return ""
+
+# ── 读取数据 ──
+print("读取鹿小仓2（真实库存）...")
+df_base = pd.read_excel(r"C:\Users\13522\Desktop\鹿小仓广安店\鹿小仓2.xlsx", dtype=str, skiprows=[1])
+df_base.columns = ['条码', '商品名称', '售价']
+df_base['售价'] = df_base['售价'].apply(parse_price)
+before = len(df_base)
+df_base = df_base.drop_duplicates(subset=['商品名称'], keep='first').reset_index(drop=True)
+print(f"  鹿小仓2: {before} -> {len(df_base)} (去重后)")
+
+print("读取鹿小仓广安购物中心（采购价来源）...")
+df_src = pd.read_excel(r"C:\Users\13522\Desktop\鹿小仓广安店\鹿小仓广安购物中心.xlsx", sheet_name='标准化总数据表', dtype=str)
+# "库存"列实际是采购价
+df_src['采购价'] = pd.to_numeric(df_src['库存'], errors='coerce')
+df_src.loc[df_src['采购价'] == 0, '采购价'] = None
+df_cost = df_src[df_src['采购价'].notna()].copy()
+df_cost['采购价'] = df_cost['采购价'].apply(lambda x: round(float(x), 2) if pd.notna(x) and x > 0 else None)
+df_cost = df_cost[df_cost['采购价'].notna()]
+print(f"  广安购物中心: {len(df_src)} 条, 有采购价: {len(df_cost)} 条")
+
+# ── 构建查找表 ──
+cost_map_exact = {}
+for _, r in df_cost.iterrows():
+    name = str(r['商品名称']).strip()
+    if name and name not in cost_map_exact:
+        cost_map_exact[name] = r['采购价']
+
+# 条码查找表
+cost_map_bc = {}
+for _, r in df_cost.iterrows():
+    bc = str(r.get('条码', '')).strip()
+    if bc and bc != 'nan' and bc not in cost_map_bc:
+        cost_map_bc[bc] = r['采购价']
+
+def find_cost(name, barcode):
+    if name in cost_map_exact:
+        return cost_map_exact[name], '精确匹配'
+    if barcode and barcode in cost_map_bc:
+        return cost_map_bc[barcode], '条码匹配'
+    if len(name) >= 4:
+        for src_name, cost in cost_map_exact.items():
+            if not src_name or len(src_name) < 4:
+                continue
+            if name in src_name or src_name in name:
+                return cost, '模糊匹配'
+    return None, '未匹配'
+
+# ── 匹配 ──
+print("\n匹配采购价...")
+matched = 0
+match_types = {'精确匹配':0, '条码匹配':0, '模糊匹配':0, '未匹配':0}
+cost_vals, match_labels = [], []
+
+for _, r in df_base.iterrows():
+    name = str(r['商品名称']).strip()
+    bc = str(r['条码']).strip() if pd.notna(r['条码']) else ""
+    cost, mtype = find_cost(name, bc)
+    cost_vals.append(cost)
+    match_labels.append(mtype)
+    match_types[mtype] = match_types.get(mtype, 0) + 1
+    if cost is not None:
+        matched += 1
+
+df_base['采购价'] = cost_vals
+df_base['采购价匹配方式'] = match_labels
+
+print(f"  匹配: {matched}/{len(df_base)} ({matched/len(df_base)*100:.1f}%)")
+for k, v in match_types.items():
+    print(f"    {k}: {v}")
+
+# ── 计算毛利和加价率 ──
+df_base['毛利'] = None
+df_base['加价率'] = None
+for i, r in df_base.iterrows():
+    price = r['售价']
+    cost = r['采购价']
+    if price is not None and cost is not None and cost > 0:
+        margin = round(price - cost, 2)
+        df_base.at[i, '毛利'] = margin
+        df_base.at[i, '加价率'] = round(margin / cost * 100, 1)
+
+# ── 分类和标注 ──
+df_base['一级大类'] = df_base['商品名称'].apply(lambda n: classify(str(n)))
+df_base['引流标识'] = df_base['售价'].apply(mark_flow)
+df_base['规格容量'] = df_base['商品名称'].apply(extract_spec)
+
+# 重排
+df_out = df_base[['商品名称', '一级大类', '规格容量', '售价', '采购价', '毛利', '加价率', '条码', '引流标识', '采购价匹配方式']].copy()
+df_out.insert(0, '序号', range(1, len(df_out)+1))
+
+# ── 统计 ──
+total = len(df_out)
+valid_price = df_out[df_out['售价'].notna()]
+valid_cost = df_out[df_out['采购价'].notna()]
+valid_margin = df_out[df_out['毛利'].notna()]
+flow_cnt = (df_out['引流标识'] != '').sum()
+
+print(f"\n{'='*60}")
+print(f"鹿小仓广安店 - 库存合并总表: {total} 行")
+print(f"  有售价: {len(valid_price)} ({len(valid_price)/total*100:.1f}%)")
+print(f"  有采购价: {len(valid_cost)} ({len(valid_cost)/total*100:.1f}%)")
+print(f"  有毛利: {len(valid_margin)} ({len(valid_margin)/total*100:.1f}%)")
+if len(valid_margin) > 0:
+    margins = valid_margin['毛利'].astype(float)
+    rates = valid_margin['加价率'].astype(float)
+    print(f"  平均毛利: {margins.mean():.2f}")
+    print(f"  平均加价率: {rates.mean():.1f}%")
+    print(f"  中位加价率: {rates.median():.1f}%")
+    neg = (margins < 0).sum()
+    print(f"  负毛利: {neg} 条")
+print(f"  引流品: {flow_cnt} ({flow_cnt/total*100:.1f}%)")
+
+print(f"\n  品类分布:")
+for cat, cnt in df_out['一级大类'].value_counts().items():
+    pct = cnt/total*100
+    flow = len(df_out[(df_out['一级大类']==cat) & (df_out['引流标识']!='')])
+    has_cost = len(df_out[(df_out['一级大类']==cat) & (df_out['采购价'].notna())])
+    print(f"    {cat}: {cnt} ({pct:.1f}%) [引流:{flow}, 有采购价:{has_cost}]")
+
+# ── 写Excel ──
+print(f"\n写出Excel...")
+with pd.ExcelWriter(OUT_XLSX, engine='openpyxl') as w:
+    df_out.to_excel(w, sheet_name='库存合并总表', index=False)
+
+    cat_stat = df_out.groupby('一级大类').agg(
+        SKU数=('商品名称', 'count'),
+        有售价=('售价', lambda s: s.notna().sum()),
+        有采购价=('采购价', lambda s: s.notna().sum()),
+        引流数=('引流标识', lambda s: (s != '').sum()),
+        平均售价=('售价', lambda s: pd.to_numeric(s, errors='coerce').mean()),
+        平均采购价=('采购价', lambda s: pd.to_numeric(s, errors='coerce').mean()),
+        平均毛利=('毛利', lambda s: pd.to_numeric(s, errors='coerce').mean()),
+        平均加价率=('加价率', lambda s: pd.to_numeric(s, errors='coerce').mean()),
+    ).round(2).sort_values('SKU数', ascending=False)
+    cat_stat['SKU占比'] = (cat_stat['SKU数']/total*100).round(1)
+    cat_stat['采购价覆盖率'] = (cat_stat['有采购价']/cat_stat['SKU数']*100).round(1)
+    cat_stat.to_excel(w, sheet_name='品类统计')
+
+    valid_c = valid_price.copy()
+    valid_c['售价'] = pd.to_numeric(valid_c['售价'], errors='coerce')
+    valid_c = valid_c[valid_c['售价'].notna()]
+    bins = [0, 1, 5, 10, 20, 50, 100, 200, 500, 1000, 999999]
+    labels = ['0-1元','1-5元','5-10元','10-20元','20-50元','50-100元','100-200元','200-500元','500-1000元','1000元+']
+    valid_c['价格区间'] = pd.cut(valid_c['售价'], bins=bins, labels=labels, right=False)
+    price_dist = valid_c.groupby('价格区间').agg(
+        数量=('商品名称','count'),
+        占比=('商品名称', lambda s: f"{len(s)/len(valid_c)*100:.1f}%")
+    )
+    price_dist.to_excel(w, sheet_name='价格分布')
+
+    flow_items = df_out[df_out['引流标识'] != '']
+    if len(flow_items) > 0:
+        flow_items[['商品名称','售价','采购价','一级大类','引流标识']].to_excel(w, sheet_name='引流品清单', index=False)
+
+    match_stat = df_out.groupby('采购价匹配方式').agg(
+        数量=('商品名称','count'),
+        占比=('商品名称', lambda s: f"{len(s)/total*100:.1f}%")
+    )
+    match_stat.to_excel(w, sheet_name='采购价匹配统计')
+
+    if len(valid_margin) > 0:
+        neg_margin = df_out[df_out['毛利'].notna()].copy()
+        neg_margin['毛利'] = pd.to_numeric(neg_margin['毛利'], errors='coerce')
+        neg_margin = neg_margin[neg_margin['毛利'] < 0]
+        if len(neg_margin) > 0:
+            neg_margin[['商品名称','售价','采购价','毛利','加价率','一级大类']].to_excel(w, sheet_name='负毛利商品', index=False)
+
+print(f"写出: {OUT_XLSX}")
+
+# ── 生成PDF报告 ──
+print("生成PDF报告...")
+import sys
+sys.path.insert(0, os.path.expanduser(r"~\.qclaw\skills\pdf\scripts"))
+from setup_chinese_pdf import setup_chinese_pdf
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib import colors
+
+cn_font, styles = setup_chinese_pdf()
+
+OUT_PDF = OUT_DIR / "鹿小仓广安店_库存合并报告.pdf"
+
+title_style = ParagraphStyle('T', parent=styles['Title'], fontSize=18, alignment=TA_CENTER, spaceAfter=20)
+h1_style = ParagraphStyle('H1', parent=styles['Heading1'], fontSize=14, spaceBefore=16, spaceAfter=8)
+h2_style = ParagraphStyle('H2', parent=styles['Heading2'], fontSize=12, spaceBefore=12, spaceAfter=6)
+body_style = ParagraphStyle('B', parent=styles['Normal'], fontSize=10, leading=16)
+
+cat_dist = df_out['一级大类'].value_counts()
+avg_price = valid_price['售价'].astype(float).mean() if len(valid_price) > 0 else 0
+median_price = valid_price['售价'].astype(float).median() if len(valid_price) > 0 else 0
+avg_cost = valid_cost['采购价'].astype(float).mean() if len(valid_cost) > 0 else 0
+avg_margin = valid_margin['毛利'].astype(float).mean() if len(valid_margin) > 0 else 0
+avg_rate = valid_margin['加价率'].astype(float).mean() if len(valid_margin) > 0 else 0
+med_rate = valid_margin['加价率'].astype(float).median() if len(valid_margin) > 0 else 0
+neg_cnt = (valid_margin['毛利'].astype(float) < 0).sum() if len(valid_margin) > 0 else 0
+
+bins = [0, 1, 5, 10, 20, 50, 100, 200, 500, 1000, 999999]
+labels = ['0-1元','1-5元','5-10元','10-20元','20-50元','50-100元','100-200元','200-500元','500-1000元','1000元+']
+price_dist_data = pd.cut(valid_price['售价'].astype(float), bins=bins, labels=labels, right=False).value_counts().sort_index()
+
+story = []
+story.append(Paragraph("鹿小仓广安店 - 库存合并报告", title_style))
+story.append(Paragraph(f"生成日期: 2026-07-08 | 总SKU: {total} | 有采购价: {len(valid_cost)} ({len(valid_cost)/total*100:.1f}%)", body_style))
+story.append(Spacer(1, 12))
+
+# 第一章
+story.append(Paragraph("一、采购价匹配情况", h1_style))
+match_data = [[Paragraph("匹配方式", body_style), Paragraph("数量", body_style), Paragraph("占比", body_style)]]
+for k, v in match_types.items():
+    match_data.append([Paragraph(k, body_style), Paragraph(str(v), body_style), Paragraph(f"{v/total*100:.1f}%", body_style)])
+t = Table(match_data, colWidths=[150, 80, 80])
+t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.5,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white)]))
+story.append(t)
+story.append(Spacer(1, 8))
+story.append(Paragraph(f"采购价覆盖率: {len(valid_cost)}/{total} ({len(valid_cost)/total*100:.1f}%)", body_style))
+
+# 第二章
+story.append(Paragraph("二、商品结构分析", h1_style))
+story.append(Paragraph("2.1 品类分布", h2_style))
+cat_header = [Paragraph(h, body_style) for h in ["品类","SKU数","占比","有采购价","覆盖率","引流品","平均售价","平均采购价","平均毛利","平均加价率"]]
+cat_data = [cat_header]
+for cat in cat_dist.index:
+    cnt = int(cat_dist[cat])
+    pct = cnt / total * 100
+    cat_d = df_out[df_out['一级大类'] == cat]
+    cat_cost = len(cat_d[cat_d['采购价'].notna()])
+    cat_flow = len(cat_d[cat_d['引流标识'] != ''])
+    cat_vp = cat_d[cat_d['售价'].notna()]
+    ap = cat_vp['售价'].astype(float).mean() if len(cat_vp) > 0 else 0
+    cat_vc = cat_d[cat_d['采购价'].notna()]
+    ac = cat_vc['采购价'].astype(float).mean() if len(cat_vc) > 0 else 0
+    cat_vm = cat_d[cat_d['毛利'].notna()]
+    am = cat_vm['毛利'].astype(float).mean() if len(cat_vm) > 0 else 0
+    ar = cat_vm['加价率'].astype(float).mean() if len(cat_vm) > 0 else 0
+    cr = f"{cat_cost/cnt*100:.1f}%" if cnt > 0 else "0%"
+    cat_data.append([Paragraph(cat, body_style), Paragraph(str(cnt), body_style), Paragraph(f"{pct:.1f}%", body_style),
+                     Paragraph(str(cat_cost), body_style), Paragraph(cr, body_style), Paragraph(str(cat_flow), body_style),
+                     Paragraph(f"{ap:.2f}", body_style), Paragraph(f"{ac:.2f}", body_style), Paragraph(f"{am:.2f}", body_style),
+                     Paragraph(f"{ar:.1f}%", body_style)])
+t = Table(cat_data, colWidths=[55,35,35,42,38,35,42,50,42,50])
+t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.3,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white),('FONTSIZE',(0,0),(-1,-1),8)]))
+story.append(t)
+
+# 第三章
+story.append(PageBreak())
+story.append(Paragraph("三、价格与毛利分析", h1_style))
+story.append(Paragraph("3.1 整体价格与毛利", h2_style))
+overview = [
+    [Paragraph("指标", body_style), Paragraph("数值", body_style)],
+    [Paragraph("平均售价", body_style), Paragraph(f"{avg_price:.2f} 元", body_style)],
+    [Paragraph("中位售价", body_style), Paragraph(f"{median_price:.2f} 元", body_style)],
+    [Paragraph("平均采购价", body_style), Paragraph(f"{avg_cost:.2f} 元", body_style)],
+    [Paragraph("平均毛利", body_style), Paragraph(f"{avg_margin:.2f} 元", body_style)],
+    [Paragraph("平均加价率", body_style), Paragraph(f"{avg_rate:.1f}%", body_style)],
+    [Paragraph("中位加价率", body_style), Paragraph(f"{med_rate:.1f}%", body_style)],
+    [Paragraph("负毛利商品", body_style), Paragraph(f"{neg_cnt} 条", body_style)],
+]
+t = Table(overview, colWidths=[150, 100])
+t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.5,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white)]))
+story.append(t)
+
+story.append(Paragraph("3.2 价格区间分布", h2_style))
+pd_header = [Paragraph(h, body_style) for h in ["价格区间","数量","占比"]]
+pd_data = [pd_header]
+for label in labels:
+    cnt = int(price_dist_data.get(label, 0))
+    pct = cnt / len(valid_price) * 100 if len(valid_price) > 0 else 0
+    pd_data.append([Paragraph(label, body_style), Paragraph(str(cnt), body_style), Paragraph(f"{pct:.1f}%", body_style)])
+t = Table(pd_data, colWidths=[100, 80, 80])
+t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.5,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white)]))
+story.append(t)
+
+# 加价率分布
+if len(valid_margin) > 0:
+    rates = valid_margin['加价率'].astype(float)
+    rate_bins = [-999, 0, 10, 20, 30, 50, 80, 100, 150, 200, 9999]
+    rate_labels = ['<0%(亏损)','0-10%','10-20%','20-30%','30-50%','50-80%','80-100%','100-150%','150-200%','200%+']
+    rate_dist = pd.cut(rates, bins=rate_bins, labels=rate_labels, right=False).value_counts().sort_index()
+    story.append(Paragraph("3.3 加价率分布", h2_style))
+    rd_header = [Paragraph(h, body_style) for h in ["加价率区间","数量","占比"]]
+    rd_data = [rd_header]
+    for label in rate_labels:
+        cnt = int(rate_dist.get(label, 0))
+        pct = cnt / len(rates) * 100
+        rd_data.append([Paragraph(label, body_style), Paragraph(str(cnt), body_style), Paragraph(f"{pct:.1f}%", body_style)])
+    t = Table(rd_data, colWidths=[100, 80, 80])
+    t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.5,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white)]))
+    story.append(t)
+
+# 第四章
+story.append(PageBreak())
+story.append(Paragraph("四、引流策略分析", h1_style))
+story.append(Paragraph(f"引流品总数: {flow_cnt} | 引流品占比: {flow_cnt/total*100:.1f}%", body_style))
+story.append(Spacer(1, 8))
+story.append(Paragraph("引流品品类分布", h2_style))
+fc_header = [Paragraph(h, body_style) for h in ["品类","引流品数","占该品类比"]]
+fc_data = [fc_header]
+for cat in cat_dist.index:
+    cat_d = df_out[df_out['一级大类'] == cat]
+    cat_flow = len(cat_d[cat_d['引流标识'] != ''])
+    if cat_flow > 0:
+        fc_data.append([Paragraph(cat, body_style), Paragraph(str(cat_flow), body_style), Paragraph(f"{cat_flow/len(cat_d)*100:.1f}%", body_style)])
+t = Table(fc_data, colWidths=[120, 80, 80])
+t.setStyle(TableStyle([('GRID',(0,0),(-1,-1),0.5,colors.grey),('BACKGROUND',(0,0),(-1,0),colors.HexColor('#2E4057')),('TEXTCOLOR',(0,0),(-1,0),colors.white)]))
+story.append(t)
+
+# 第五章
+story.append(Paragraph("五、经营建议", h1_style))
+story.append(Paragraph(f"<b>采购价管理</b><br/>采购价覆盖率{len(valid_cost)/total*100:.1f}%，{'覆盖率较好' if len(valid_cost)/total*100 > 60 else '覆盖率偏低，建议补充采购价数据'}。{neg_cnt}个商品存在负毛利，需重点关注定价策略。建议定期核对采购价，确保毛利数据准确。", body_style))
+story.append(Spacer(1, 8))
+story.append(Paragraph(f"<b>商品结构</b><br/>总SKU {total}个，覆盖{len(cat_dist)}个大类。头部品类{cat_dist.index[0]}占{cat_dist.iloc[0]/total*100:.1f}%。建议结合销量数据优化SKU结构。", body_style))
+story.append(Spacer(1, 8))
+story.append(Paragraph(f"<b>定价优化</b><br/>主力价格带{price_dist_data.idxmax()}。平均加价率{avg_rate:.1f}%，中位加价率{med_rate:.1f}%。建议对负毛利商品调价或优化采购渠道。加价率低于20%的商品可考虑提价或换供应商。", body_style))
+
+doc = SimpleDocTemplate(str(OUT_PDF), pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+doc.build(story)
+print(f"写出: {OUT_PDF}")
+
+# 删除旧的md报告
+old_md = OUT_DIR / "鹿小仓广安店_库存合并报告.md"
+if old_md.exists():
+    old_md.unlink()
+    print(f"删除旧md: {old_md}")
+
+# 清理探查脚本
+for p in [r"C:\Users\13522\.qclaw\workspace\luxiaocang\_lxc_ga_probe.py",
+          r"C:\Users\13522\.qclaw\workspace\luxiaocang\_lxc_ga_probe2.py",
+          r"C:\Users\13522\.qclaw\workspace\luxiaocang\_lxc_ga_probe3.py"]:
+    try: os.remove(p)
+    except: pass
+
+print("\n完成!")

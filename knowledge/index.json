@@ -1,0 +1,113 @@
+{
+  "version": "1.0",
+  "updated": "2026-07-11",
+  "description": "鹿小仓Agent知识资产索引",
+
+  "stores": [
+    {
+      "name": "鹿小仓广安店",
+      "type": "直营门店",
+      "sku_count": 2941,
+      "files": {
+        "库存总表": "knowledge/stores/鹿小仓广安店_库存合并总表.xlsx",
+        "最终调价方案": "knowledge/stores/广安店_最终调价方案.xlsx"
+      }
+    },
+    {
+      "name": "鹿小仓财富店",
+      "type": "直营门店",
+      "sku_count": 1386,
+      "files": {
+        "库存总表": "knowledge/stores/鹿小仓财富店_库存合并总表.xlsx",
+        "标准化总数据表": "knowledge/stores/财富店_标准化总数据表.xlsx",
+        "最终调价方案": "knowledge/stores/财富店_最终调价方案.xlsx"
+      }
+    }
+  ],
+
+  "competitors": [
+    {
+      "name": "小柴购",
+      "type": "便利店竞品",
+      "sku_count": 7659,
+      "files": {
+        "全量数据表": "knowledge/competitors/小柴购_全量数据表_v5.xlsx",
+        "竞争对比分析": "knowledge/competitors/广安店vs小柴购_竞争对比分析.xlsx"
+      },
+      "coverage": "广安店区域"
+    },
+    {
+      "name": "厉臣超市",
+      "type": "精品超市竞品",
+      "sku_count": 1996,
+      "files": {
+        "标准化总数据表": "knowledge/competitors/厉臣超市_标准化总数据表.xlsx",
+        "竞争对比分析": "knowledge/competitors/财富店vs厉臣超市_竞争对比分析.xlsx"
+      },
+      "coverage": "财富店区域",
+      "note": "精品店定位，部分商品价格偏高属正常溢价"
+    }
+  ],
+
+  "industry_data": [
+    {
+      "name": "商圈扫描_财富广场",
+      "file": "knowledge/industry/商圈扫描_财富广场.xlsx",
+      "type": "POI数据"
+    },
+    {
+      "name": "高德API商圈扫描记录",
+      "file": "knowledge/industry/高德API商圈扫描_20260710.md",
+      "type": "方法论"
+    },
+    {
+      "name": "能力边界审计",
+      "file": "knowledge/industry/能力边界审计_20260710.md",
+      "type": "技术审计"
+    },
+    {
+      "name": "采集方案验证",
+      "file": "knowledge/industry/采集方案验证_20260710.md",
+      "type": "技术验证"
+    }
+  ],
+
+  "blueprints": [
+    "便利店创业方案_分析框架",
+    "便利店商业智能体_架构蓝图v0.1",
+    "便利店商业智能体_架构蓝图v0.2",
+    "便利店智能体_信息采集能力体系v0.1",
+    "便利店运营智能体_能力蓝图"
+  ],
+
+  "cases": [
+    "商品比价调价全流程记录（广安店vs小柴购、财富店vs丽晨超市）",
+    "财富店vs厉臣超市竞争分析",
+    "鹿小仓Agent内核逻辑拆解",
+    "鹿小仓Agent独立化方案"
+  ],
+
+  "scripts": [
+    {"name": "compare_price.py", "desc": "商品比价核心脚本（模糊匹配+规格校验）"},
+    {"name": "gen_price_plan.py", "desc": "生成调价方案"},
+    {"name": "gen_clean_final.py", "desc": "生成干净终稿"},
+    {"name": "fuzzy_match.py", "desc": "Jaccard+SequenceMatcher模糊匹配"},
+    {"name": "review_match.py", "desc": "匹配结果深度复核"},
+    {"name": "data_merge.py", "desc": "数据合并主控脚本"},
+    {"name": "merge_guang'an.py", "desc": "广安店数据合并"},
+    {"name": "merge_caifu.py", "desc": "财富店数据合并"},
+    {"name": "competitive_analysis.py", "desc": "竞争对比分析"},
+    {"name": "gen_report_pdf.py", "desc": "生成PDF报告"},
+    {"name": "ocr_extract.py", "desc": "OCR识别提取"},
+    {"name": "video_pipeline.py", "desc": "视频帧提取+OCR流水线"}
+  ],
+
+  "stats": {
+    "total_sku": 13982,
+    "total_stores": 2,
+    "total_competitors": 2,
+    "total_scripts": 12,
+    "total_blueprints": 5,
+    "total_cases": 4
+  }
+}

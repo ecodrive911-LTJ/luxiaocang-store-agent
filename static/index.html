@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>鹿小仓 — 便利店经营决策Agent</title>
+<style>
+:root {
+  --bg: #0a0b10;
+  --bg-chat: #11131a;
+  --bg-card: #181a23;
+  --bg-input: #1e2030;
+  --bg-hover: #22242f;
+  --border: #2a2d3a;
+  --border-light: #353846;
+  --text: #e8eaf0;
+  --text-dim: #8b8f9e;
+  --text-faint: #565866;
+  --accent: #4fc3f7;
+  --accent-glow: rgba(79, 195, 247, 0.15);
+  --accent-dim: #1a8ac4;
+  --warn: #ffa726;
+  --danger: #ef5350;
+  --success: #66bb6a;
+  --purple: #b388ff;
+  --radius: 14px;
+  --radius-sm: 8px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ===== Top Bar ===== */
+.topbar {
+  background: var(--bg-chat);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-shrink: 0;
+  z-index: 10;
+}
+.logo {
+  width: 40px; height: 40px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  box-shadow: 0 0 16px rgba(79,195,247,0.25);
+}
+.topbar-title { font-size: 16px; font-weight: 700; }
+.topbar-sub { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+.topbar-status {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--success);
+  margin-left: 8px;
+  padding: 3px 10px;
+  background: rgba(102,187,106,0.1);
+  border: 1px solid rgba(102,187,106,0.2);
+  border-radius: 20px;
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--success);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+.topbar-right { margin-left: auto; display: flex; gap: 8px; }
+.topbar-btn {
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.topbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ===== Layout ===== */
+.app-body { flex: 1; display: flex; overflow: hidden; }
+
+/* ===== Sidebar ===== */
+.sidebar {
+  width: 280px;
+  background: var(--bg-chat);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  padding: 16px;
+}
+.side-section { margin-bottom: 20px; }
+.side-title {
+  font-size: 11px; color: var(--text-faint);
+  text-transform: uppercase; letter-spacing: 1.5px;
+  margin-bottom: 10px; font-weight: 600;
+}
+.side-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  margin-bottom: 8px;
+}
+.asset-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.asset-item:last-child { border: none; }
+.asset-name { color: var(--text); }
+.asset-count { color: var(--accent); font-family: 'Courier New', monospace; font-size: 12px; font-weight: 600; }
+
+.cap-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0;
+  font-size: 13px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.cap-item:last-child { border: none; }
+.cap-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.cap-dot.ready { background: var(--success); }
+.cap-dot.partial { background: var(--warn); }
+.cap-dot.pending { background: var(--text-faint); }
+.cap-dot.active { background: var(--accent); animation: pulse 1.5s infinite; }
+
+.config-item {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 6px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+.config-item:last-child { border: none; }
+.config-val { color: var(--success); font-size: 11px; }
+.config-val.off { color: var(--danger); }
+
+/* ===== Chat Area ===== */
+.chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  scroll-behavior: smooth;
+}
+.chat-messages::-webkit-scrollbar { width: 6px; }
+.chat-messages::-webkit-scrollbar-track { background: transparent; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border-light); border-radius: 3px; }
+
+.msg { display: flex; gap: 12px; max-width: 85%; }
+.msg.user { align-self: flex-end; flex-direction: row-reverse; }
+.msg-avatar {
+  width: 34px; height: 34px;
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.msg.agent .msg-avatar {
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.msg.user .msg-avatar {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+.msg-bubble {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--text);
+}
+.msg.agent .msg-bubble {
+  border-color: var(--border-light);
+}
+.msg.user .msg-bubble {
+  background: var(--bg-input);
+  border-color: var(--accent-dim);
+}
+.msg-bubble p { margin-bottom: 8px; }
+.msg-bubble p:last-child { margin-bottom: 0; }
+.msg-bubble code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'Courier New', monospace;
+}
+.msg-bubble .action-card {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 8px 0;
+}
+.msg-bubble .action-card .ac-title {
+  font-size: 12px; color: var(--accent); font-weight: 700; margin-bottom: 3px;
+}
+.msg-bubble .action-card .ac-desc {
+  font-size: 13px; color: var(--text-dim);
+}
+
+/* Quick actions */
+.quick-actions {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  margin-top: 10px;
+}
+.quick-btn {
+  padding: 6px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.quick-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-glow);
+}
+
+/* Typing indicator */
+.typing { display: flex; gap: 4px; padding: 8px 0; }
+.typing span {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-faint);
+  animation: typing 1.4s infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ===== Input Bar ===== */
+.input-bar {
+  background: var(--bg-chat);
+  border-top: 1px solid var(--border);
+  padding: 16px 24px;
+  flex-shrink: 0;
+}
+.input-wrap {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  max-width: 900px;
+  margin: 0 auto;
+}
+.input-box {
+  flex: 1;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  resize: none;
+  min-height: 46px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.15s;
+  line-height: 1.6;
+}
+.input-box:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+.input-box::placeholder { color: var(--text-faint); }
+.send-btn {
+  width: 46px; height: 46px;
+  border-radius: var(--radius);
+  background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+  border: none;
+  color: white;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.send-btn:hover { transform: scale(1.05); box-shadow: 0 0 16px var(--accent-glow); }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+/* ===== Modal ===== */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: none;
+  align-items: center; justify-content: center;
+  z-index: 100;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  width: 480px;
+  max-width: 90%;
+}
+.modal h2 { font-size: 18px; margin-bottom: 20px; }
+.modal-field { margin-bottom: 16px; }
+.modal-field label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+.modal-field select, .modal-field input {
+  width: 100%;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+.modal-field select:focus, .modal-field input:focus { border-color: var(--accent); }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+.modal-btn {
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text-dim);
+}
+.modal-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+.modal-btn:hover { opacity: 0.85; }
+
+/* ===== Welcome ===== */
+.welcome-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+}
+.welcome-logo {
+  width: 72px; height: 72px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px;
+  margin-bottom: 20px;
+  box-shadow: 0 0 32px var(--accent-glow);
+}
+.welcome-title { font-size: 24px; font-weight: 700; margin-bottom: 8px; }
+.welcome-desc { font-size: 14px; color: var(--text-dim); max-width: 460px; line-height: 1.7; margin-bottom: 28px; }
+.welcome-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  max-width: 680px;
+  width: 100%;
+}
+.welcome-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+}
+.welcome-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+.welcome-card .wc-icon { font-size: 22px; margin-bottom: 8px; }
+.welcome-card .wc-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
+.welcome-card .wc-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
+
+@media (max-width: 768px) {
+  .sidebar { display: none; }
+  .chat-messages { padding: 16px; }
+  .msg { max-width: 95%; }
+  .topbar { padding: 10px 14px; gap: 10px; }
+  .logo { width: 34px; height: 34px; font-size: 16px; border-radius: 10px; }
+  .topbar-title { font-size: 14px; }
+  .topbar-sub { font-size: 10px; }
+  .topbar-status { font-size: 10px; padding: 2px 8px; }
+  .topbar-btn { padding: 5px 10px; font-size: 11px; }
+  .chat-input-area { padding: 10px 14px; gap: 8px; }
+  .chat-input { font-size: 16px; }
+  .send-btn { width: 38px; height: 38px; font-size: 16px; }
+  .welcome-card { padding: 20px 16px; }
+  .welcome-title { font-size: 20px; }
+  .welcome-desc { font-size: 13px; }
+}
+
+@media (max-width: 480px) {
+  .topbar-sub { display: none; }
+  .topbar-status { display: none; }
+  .topbar-title { font-size: 15px; }
+  .chat-messages { padding: 12px 8px; }
+  .msg { max-width: 92%; }
+  .msg-content { font-size: 14px; }
+  .welcome-card { padding: 16px 12px; }
+  .welcome-title { font-size: 18px; }
+  .welcome-desc { font-size: 12px; }
+  .quick-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Top Bar ===== -->
+<div class="topbar">
+  <div class="logo">📊</div>
+  <div>
+    <div class="topbar-title">鹿小仓</div>
+    <div class="topbar-sub">便利店经营决策Agent · v0.3 · 复投科技出品</div>
+  </div>
+  <div class="topbar-status">
+    <span class="status-dot"></span>
+    <span id="statusText">在线</span>
+  </div>
+  <div class="topbar-right">
+    <button class="topbar-btn" onclick="openConfig()">⚙️ 设置</button>
+    <button class="topbar-btn" onclick="clearChat()">🗑️ 清空</button>
+  </div>
+</div>
+
+<div class="app-body">
+  <!-- ===== Sidebar ===== -->
+  <div class="sidebar">
+    <!-- Data Assets -->
+    <div class="side-section">
+      <div class="side-title">▸ 数据资产</div>
+      <div class="side-card">
+        <div class="asset-item"><span class="asset-name">鹿小仓广安店</span><span class="asset-count">2,941</span></div>
+        <div class="asset-item"><span class="asset-name">鹿小仓财富店</span><span class="asset-count">1,386</span></div>
+        <div class="asset-item"><span class="asset-name">小柴购（竞品）</span><span class="asset-count">7,659</span></div>
+        <div class="asset-item"><span class="asset-name">厉臣超市（竞品）</span><span class="asset-count">1,996</span></div>
+        <div class="asset-item"><span class="asset-name">商圈POI扫描</span><span class="asset-count">1,396</span></div>
+        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text-faint);">
+          总计 13,982 条商品数据
+        </div>
+      </div>
+    </div>
+
+    <!-- Capabilities -->
+    <div class="side-section">
+      <div class="side-title">▸ 能力模块</div>
+      <div class="side-card">
+        <div class="cap-item"><span class="cap-dot active"></span> 模块0 · 数据采集</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块1 · 选址评估</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块2 · 建店规划</div>
+        <div class="cap-item"><span class="cap-dot partial"></span> 模块3 · 选品规划</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块4 · 定价策略</div>
+        <div class="cap-item"><span class="cap-dot partial"></span> 模块5 · 供应链</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块6 · 品牌管理</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块7 · 运营诊断</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块8 · 促销营销</div>
+        <div class="cap-item"><span class="cap-dot ready"></span> 模块9 · 财务管理</div>
+      </div>
+    </div>
+
+    <!-- System Config -->
+    <div class="side-section">
+      <div class="side-title">▸ 系统</div>
+      <div class="side-card">
+        <div class="config-item"><span>大模型</span><span class="config-val off" id="cfgLlm">未配置</span></div>
+        <div class="config-item"><span>采集引擎</span><span class="config-val">就绪</span></div>
+        <div class="config-item"><span>OCR引擎</span><span class="config-val">就绪</span></div>
+        <div class="config-item"><span>高德API</span><span class="config-val">已配置</span></div>
+      </div>
+    </div>
+
+    <!-- Expert Team -->
+    <div class="side-section">
+      <div class="side-title">▸ 专家团队</div>
+      <div class="side-card" style="font-size:12px;line-height:2;color:var(--text-dim);">
+        📈 消费品分析师<br>
+        💰 投行专家<br>
+        🚚 供应链领导人<br>
+        🏪 便利店连锁高管
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Chat Area ===== -->
+  <div class="chat-area">
+    <div class="chat-messages" id="messages">
+      <!-- Welcome screen -->
+      <div class="welcome-screen" id="welcome">
+        <div class="welcome-logo">📊</div>
+        <div class="welcome-title">你好，我是鹿小仓</div>
+        <div class="welcome-desc">
+          便利店经营决策Agent。我能采集竞品数据、分析门店运营、给出选品定价方案。<br>
+          直接跟我说话，或者说"你需要我做什么"——我会引导你。
+        </div>
+        <div class="welcome-cards">
+          <div class="welcome-card" onclick="sendQuick('帮我做一次广安店的运营诊断')">
+            <div class="wc-icon">📋</div>
+            <div class="wc-title">运营诊断</div>
+            <div class="wc-desc">分析销售趋势、品类贡献、滞销品</div>
+          </div>
+          <div class="welcome-card" onclick="sendQuick('我要采集竞品价格')">
+            <div class="wc-icon">🔍</div>
+            <div class="wc-title">竞品采集</div>
+            <div class="wc-desc">打开美团店铺页，我自动采集商品价格</div>
+          </div>
+          <div class="welcome-card" onclick="sendQuick('扫描广安购物中心周边商圈')">
+            <div class="wc-icon">📍</div>
+            <div class="wc-title">商圈扫描</div>
+            <div class="wc-desc">输入地址，扫描周边POI和竞品分布</div>
+          </div>
+          <div class="welcome-card" onclick="sendQuick('广安店和财富店对比分析')">
+            <div class="wc-icon">⚖️</div>
+            <div class="wc-title">门店对比</div>
+            <div class="wc-desc">对比两家店的SKU、品类、毛利结构</div>
+          </div>
+          <div class="welcome-card" onclick="sendQuick('帮我做选品规划')">
+            <div class="wc-icon">📦</div>
+            <div class="wc-title">选品规划</div>
+            <div class="wc-desc">基于竞品数据推荐品类和SKU</div>
+          </div>
+          <div class="welcome-card" onclick="sendQuick('帮我做定价策略分析')">
+            <div class="wc-icon">🏷️</div>
+            <div class="wc-title">定价策略</div>
+            <div class="wc-desc">毛利分析、价格带、引流品定价</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input Bar -->
+    <div class="input-bar">
+      <div class="input-wrap">
+        <textarea
+          class="input-box"
+          id="input"
+          placeholder="跟鹿小仓说点什么..."
+          rows="1"
+          onkeydown="handleKey(event)"
+          oninput="autoResize(this)"
+        ></textarea>
+        <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Config Modal ===== -->
+<div class="modal-overlay" id="configModal">
+  <div class="modal">
+    <h2>⚙️ 大模型配置</h2>
+    <div class="modal-field">
+      <label>服务商</label>
+      <select id="cfgProvider" onchange="onProviderChange()">
+        <option value="volcengine">火山引擎（豆包）</option>
+        <option value="zhipu">智谱GLM</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="openai">OpenAI</option>
+        <option value="moonshot">Moonshot (Kimi)</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>API Key</label>
+      <input type="password" id="cfgApiKey" placeholder="sk-...">
+    </div>
+    <div class="modal-field">
+      <label>Base URL</label>
+      <input type="text" id="cfgBaseUrl" placeholder="https://...">
+    </div>
+    <div class="modal-field">
+      <label>模型名称</label>
+      <input type="text" id="cfgModel" placeholder="glm-4-plus">
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeConfig()">取消</button>
+      <button class="modal-btn primary" onclick="saveConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let isStreaming = false;
+let hasMessages = false;
+
+// ===== Init =====
+async function init() {
+  const resp = await fetch('/api/status');
+  const data = await resp.json();
+  if (data.llm_configured) {
+    document.getElementById('cfgLlm').textContent = data.llm_model || '已配置';
+    document.getElementById('cfgLlm').classList.remove('off');
+  }
+  // Load conversation history
+  await loadHistory();
+}
+
+async function loadHistory() {
+  const resp = await fetch('/api/conversations?limit=30');
+  const data = await resp.json();
+  if (data.messages && data.messages.length > 0) {
+    document.getElementById('welcome').style.display = 'none';
+    hasMessages = true;
+    for (const msg of data.messages) {
+      addMessage(msg.role, msg.content, false);
+    }
+    scrollToBottom();
+  }
+}
+
+// ===== Chat =====
+function handleKey(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+function autoResize(el) {
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+}
+
+function sendQuick(text) {
+  document.getElementById('input').value = text;
+  sendMessage();
+}
+
+function sendMessage() {
+  const input = document.getElementById('input');
+  const text = input.value.trim();
+  if (!text || isStreaming) return;
+
+  if (!hasMessages) {
+    document.getElementById('welcome').style.display = 'none';
+    hasMessages = true;
+  }
+
+  addMessage('user', text);
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Stream response
+  streamChat(text);
+}
+
+function addMessage(role, content, animate = true) {
+  const messages = document.getElementById('messages');
+  const msg = document.createElement('div');
+  msg.className = `msg ${role}`;
+
+  const avatar = document.createElement('div');
+  avatar.className = 'msg-avatar';
+  avatar.textContent = role === 'user' ? '👤' : '📊';
+
+  const bubble = document.createElement('div');
+  bubble.className = 'msg-bubble';
+  if (animate) {
+    bubble.innerHTML = '<div class="typing"><span></span><span></span><span></span></div>';
+  } else {
+    bubble.innerHTML = formatContent(content);
+  }
+
+  msg.appendChild(avatar);
+  msg.appendChild(bubble);
+  messages.appendChild(msg);
+  scrollToBottom();
+  return bubble;
+}
+
+async function streamChat(text) {
+  isStreaming = true;
+  document.getElementById('sendBtn').disabled = true;
+
+  const bubble = addMessage('agent', '');
+  let fullContent = '';
+
+  try {
+    // XMLHttpRequest流式接收，兼容所有浏览器
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/chat', true);
+    xhr.setRequestHeader('Content-Type', 'application/json');
+    xhr.responseType = 'text';
+
+    let lastIndex = 0;
+    let buffer = '';
+
+    xhr.onprogress = function() {
+      const newData = xhr.responseText.substring(lastIndex);
+      lastIndex = xhr.responseText.length;
+      buffer += newData;
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.content) {
+              fullContent += data.content;
+              bubble.innerHTML = formatContent(fullContent);
+              scrollToBottom();
+            }
+            if (data.error) {
+              fullContent += '\u274c ' + data.error;
+              bubble.innerHTML = formatContent(fullContent);
+            }
+          } catch (e) {}
+        }
+      }
+    };
+
+    xhr.onload = function() {
+      // 处理剩余buffer
+      if (buffer.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(buffer.slice(6));
+          if (data.content) {
+            fullContent += data.content;
+            bubble.innerHTML = formatContent(fullContent);
+          }
+        } catch (e) {}
+      }
+      if (!fullContent) {
+        // 流式失败，降级到同步接口
+        fetch('/api/chat/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text }),
+        }).then(r => r.json()).then(data => {
+          bubble.innerHTML = formatContent(data.reply || '收到空回复，请重试');
+          scrollToBottom();
+        }).catch(() => {
+          bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u8fde\u63a5\u5931\u8d25\uff0c\u8bf7\u91cd\u8bd5</p>';
+        });
+      }
+      isStreaming = false;
+      document.getElementById('sendBtn').disabled = false;
+    };
+
+    xhr.onerror = function() {
+      // 网络错误，降级到同步接口
+      fetch('/api/chat/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      }).then(r => r.json()).then(data => {
+        bubble.innerHTML = formatContent(data.reply || '收到空回复，请重试');
+        scrollToBottom();
+      }).catch(() => {
+        bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u7f51\u7edc\u9519\u8bef\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc\u540e\u91cd\u8bd5</p>';
+      });
+      isStreaming = false;
+      document.getElementById('sendBtn').disabled = false;
+    };
+
+    xhr.timeout = 120000;
+    xhr.send(JSON.stringify({ message: text }));
+
+  } catch (e) {
+    bubble.innerHTML = '<p style="color:var(--danger);">\u274c \u8fde\u63a5\u5931\u8d25: ' + e.message + '</p>';
+    isStreaming = false;
+    document.getElementById('sendBtn').disabled = false;
+  }
+}
+
+function formatContent(text) {
+  // Simple markdown-ish formatting
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.+?)`/g, '<code>$1</code>');
+  return '<p>' + html + '</p>';
+}
+
+function scrollToBottom() {
+  const m = document.getElementById('messages');
+  m.scrollTop = m.scrollHeight;
+}
+
+function clearChat() {
+  if (!confirm('确定清空对话？')) return;
+  document.getElementById('messages').innerHTML = `
+    <div class="welcome-screen" id="welcome">
+      <div class="welcome-logo">📊</div>
+      <div class="welcome-title">你好，我是鹿小仓</div>
+      <div class="welcome-desc">便利店经营决策Agent。直接跟我说话，或者说"你需要我做什么"。</div>
+      <div class="welcome-cards">
+        <div class="welcome-card" onclick="sendQuick('帮我做一次广安店的运营诊断')">
+          <div class="wc-icon">📋</div><div class="wc-title">运营诊断</div>
+          <div class="wc-desc">分析销售趋势、品类贡献、滞销品</div>
+        </div>
+        <div class="welcome-card" onclick="sendQuick('我要采集竞品价格')">
+          <div class="wc-icon">🔍</div><div class="wc-title">竞品采集</div>
+          <div class="wc-desc">打开美团店铺页，我自动采集商品价格</div>
+        </div>
+        <div class="welcome-card" onclick="sendQuick('扫描广安购物中心周边商圈')">
+          <div class="wc-icon">📍</div><div class="wc-title">商圈扫描</div>
+          <div class="wc-desc">输入地址，扫描周边POI和竞品分布</div>
+        </div>
+        <div class="welcome-card" onclick="sendQuick('广安店和财富店对比分析')">
+          <div class="wc-icon">⚖️</div><div class="wc-title">门店对比</div>
+          <div class="wc-desc">对比两家店的SKU、品类、毛利结构</div>
+        </div>
+      </div>
+    </div>`;
+  hasMessages = false;
+  // Note: server-side history is kept, this only clears UI
+}
+
+// ===== Config =====
+function openConfig() {
+  document.getElementById('configModal').classList.add('show');
+  // Load current config
+  fetch('/api/config').then(r => r.json()).then(data => {
+    document.getElementById('cfgProvider').value = data.provider || 'zhipu';
+    document.getElementById('cfgBaseUrl').value = data.base_url || '';
+    document.getElementById('cfgModel').value = data.model || '';
+    document.getElementById('cfgApiKey').placeholder = data.api_key_set ? '已设置（输入新值覆盖）' : 'sk-...';
+  });
+}
+
+function closeConfig() {
+  document.getElementById('configModal').classList.remove('show');
+}
+
+function onProviderChange() {
+  const provider = document.getElementById('cfgProvider').value;
+  const presets = {
+    volcengine: { url: 'https://ark.cn-beijing.volces.com/api/v3', model: '' },
+    zhipu: { url: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-plus' },
+    deepseek: { url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+    openai: { url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+    moonshot: { url: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  };
+  const p = presets[provider];
+  if (p) {
+    document.getElementById('cfgBaseUrl').value = p.url;
+    document.getElementById('cfgModel').value = p.model;
+  }
+}
+
+async function saveConfig() {
+  const data = {
+    provider: document.getElementById('cfgProvider').value,
+    api_key: document.getElementById('cfgApiKey').value || null,
+    base_url: document.getElementById('cfgBaseUrl').value || null,
+    model: document.getElementById('cfgModel').value || null,
+  };
+  const resp = await fetch('/api/config', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  const result = await resp.json();
+  if (result.ok) {
+    closeConfig();
+    location.reload();
+  } else {
+    alert('保存失败: ' + (result.message || ''));
+  }
+}
+
+// ===== Start =====
+init();
+</script>
+</body>
+</html>
