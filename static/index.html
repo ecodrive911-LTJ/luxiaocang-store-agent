@@ -500,7 +500,7 @@ body {
   <div class="auth-card">
     <div class="auth-logo">📊</div>
     <div class="auth-title">鹿小仓</div>
-    <div class="auth-sub">便利店经营决策Agent · v0.4</div>
+    <div class="auth-sub">便利店经营决策Agent · v0.5</div>
     <div class="auth-tabs">
       <button class="auth-tab active" id="tabLogin" onclick="switchAuthTab('login')">登录</button>
       <button class="auth-tab" id="tabRegister" onclick="switchAuthTab('register')">注册</button>
@@ -542,7 +542,7 @@ body {
   <div class="logo">📊</div>
   <div>
     <div class="topbar-title">鹿小仓</div>
-    <div class="topbar-sub">便利店经营决策Agent · v0.4 · 复投科技出品</div>
+    <div class="topbar-sub">便利店经营决策Agent · v0.5 · 复投科技出品</div>
   </div>
   <div class="topbar-status">
     <span class="status-dot"></span>
@@ -552,6 +552,7 @@ body {
     <select class="store-selector" id="storeSelector" onchange="onStoreChange()">
       <option value="">选择门店</option>
     </select>
+    <button class="topbar-btn" id="btnTasks" onclick="openTaskMgmt()" style="display:none;">📋 任务</button>
     <button class="topbar-btn" id="btnSettings" onclick="openConfig()" style="display:none;">⚙️ 设置</button>
     <button class="topbar-btn" id="btnUsers" onclick="openUserMgmt()" style="display:none;">👥 用户</button>
     <button class="topbar-btn" onclick="logout()">🚪 登出</button>
@@ -752,6 +753,87 @@ body {
   </div>
 </div>
 
+<!-- ===== Task Management Modal ===== -->
+<div class="modal-overlay" id="taskModal">
+  <div class="modal" style="width:700px;max-height:85vh;overflow-y:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">📋 数据采集任务</h2>
+      <button class="modal-btn primary" onclick="openCreateTask()">➕ 新建任务</button>
+    </div>
+    <div id="taskList" style="max-height:400px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- ===== Create Task Modal ===== -->
+<div class="modal-overlay" id="createTaskModal">
+  <div class="modal" style="width:650px;max-height:85vh;overflow-y:auto;">
+    <h2>📋 新建采集任务</h2>
+    <div class="modal-field">
+      <label>任务类型</label>
+      <select id="newTaskType" onchange="onTaskTypeChange()">
+        <option value="price_compare">🔍 对标商品比价</option>
+        <option value="competitor_scan">🏪 竞品全店扫描</option>
+        <option value="self_check">✅ 门店自检</option>
+      </select>
+    </div>
+    <div class="modal-field">
+      <label>任务标题</label>
+      <input type="text" id="newTaskTitle" placeholder="如：广安店周三竞品比价">
+    </div>
+    <div class="modal-field">
+      <label>目标门店</label>
+      <select id="newTaskStore"></select>
+    </div>
+    <div class="modal-field" id="fieldCompetitor">
+      <label>目标竞品店</label>
+      <input type="text" id="newTaskCompetitor" placeholder="如：罗森便利店(广安店)">
+    </div>
+    <div class="modal-field">
+      <label>截止时间</label>
+      <input type="datetime-local" id="newTaskDeadline">
+    </div>
+    <div class="modal-field">
+      <label>任务说明</label>
+      <textarea id="newTaskDesc" rows="2" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;color:var(--text);padding:10px;font-family:inherit;font-size:13px;resize:vertical;" placeholder="如：请按以下顺序在美团搜索商品并截屏/录屏..."></textarea>
+    </div>
+    <div id="taskItemsSection" style="margin-top:12px;">
+      <label style="font-size:13px;color:var(--text-dim);margin-bottom:8px;display:block;">采集商品清单（从对标商品库中选择）</label>
+      <div style="max-height:200px;overflow-y:auto;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:8px;">
+        <div id="benchmarkCheckboxes" style="font-size:12px;">加载中...</div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeCreateTask()">取消</button>
+      <button class="modal-btn primary" onclick="doCreateTask()">创建任务</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Task Detail Modal ===== -->
+<div class="modal-overlay" id="taskDetailModal">
+  <div class="modal" style="width:650px;max-height:85vh;overflow-y:auto;">
+    <h2 id="taskDetailTitle">任务详情</h2>
+    <div id="taskDetailInfo" style="font-size:13px;line-height:1.8;"></div>
+    <div style="margin-top:16px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">📋 商品清单</div>
+      <div id="taskItemsList" style="font-size:12px;"></div>
+    </div>
+    <div style="margin-top:16px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;">📤 上传记录</div>
+      <div id="taskUploadsList" style="font-size:12px;"></div>
+    </div>
+    <div style="margin-top:12px;">
+      <label style="font-size:12px;color:var(--text-dim);">上传录屏视频 (≤50MB)</label>
+      <input type="file" id="uploadFileInput" accept="video/*" style="display:block;margin-top:4px;">
+      <button class="modal-btn primary" onclick="doUpload()" style="margin-top:8px;">📤 上传视频</button>
+      <span id="uploadStatus" style="font-size:12px;color:var(--text-dim);margin-left:8px;"></span>
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn" onclick="closeTaskDetail()">关闭</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Auth State =====
 let token = localStorage.getItem('lxc_token') || '';
@@ -880,12 +962,15 @@ async function afterLogin() {
     // 根据角色控制 UI
     const role = currentUser.role || 'store_owner';
     if (role === 'admin') {
+      document.getElementById('btnTasks').style.display = '';
       document.getElementById('btnSettings').style.display = '';
       document.getElementById('btnUsers').style.display = '';
     } else if (role === 'manager') {
+      document.getElementById('btnTasks').style.display = '';
       document.getElementById('btnSettings').style.display = '';
       document.getElementById('btnUsers').style.display = 'none';
     } else {
+      document.getElementById('btnTasks').style.display = '';
       document.getElementById('btnSettings').style.display = 'none';
       document.getElementById('btnUsers').style.display = 'none';
     }
@@ -1188,6 +1273,189 @@ async function createUser() {
       await loadUsers();
     } else { alert('创建失败: ' + (data.detail || '')); }
   } catch (e) { alert('创建失败: ' + e.message); }
+}
+
+// ===== Task Management =====
+let currentTaskId = null;
+let currentBenchmarkProducts = [];
+
+async function openTaskMgmt() {
+  document.getElementById('taskModal').classList.add('show');
+  await loadTasks();
+}
+function closeTaskMgmt() { document.getElementById('taskModal').classList.remove('show'); }
+
+async function loadTasks() {
+  try {
+    const resp = await api('/api/tasks');
+    const data = await resp.json();
+    const list = document.getElementById('taskList');
+    if (!data.tasks || data.tasks.length === 0) {
+      list.innerHTML = '<p style="color:var(--text-faint);text-align:center;padding:20px;">暂无任务，点击"新建任务"开始</p>';
+      return;
+    }
+    const statusMap = {pending:'⏳待开始', in_progress:'🔄进行中', submitted:'✅已提交', done:'✅已完成', expired:'⏰已超时'};
+    const statusColor = {pending:'var(--warn)', in_progress:'var(--accent)', submitted:'var(--success)', done:'var(--success)', expired:'var(--danger)'};
+    list.innerHTML = data.tasks.map(t => {
+      const progress = t.total_items > 0 ? Math.round(t.done_items/t.total_items*100) : 0;
+      return `<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px;cursor:pointer;" onclick="openTaskDetail('${t.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <strong style="font-size:13px;">${t.title}</strong>
+          <span style="font-size:11px;color:${statusColor[t.status]||'var(--text-dim)'};">${statusMap[t.status]||t.status}</span>
+        </div>
+        <div style="font-size:11px;color:var(--text-faint);margin-top:4px;">
+          ${t.store_name} · ${t.total_items}个商品 · ${t.done_items}/${t.total_items} 已完成
+          ${t.deadline ? ' · 截止: '+new Date(t.deadline).toLocaleString('zh-CN') : ''}
+        </div>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('taskList').innerHTML = '<p style="color:var(--danger);padding:10px;">加载失败: ' + e.message + '</p>';
+  }
+}
+
+async function openCreateTask() {
+  document.getElementById('createTaskModal').classList.add('show');
+  // Load stores for dropdown
+  try {
+    const resp = await api('/api/stores');
+    const data = await resp.json();
+    const sel = document.getElementById('newTaskStore');
+    sel.innerHTML = data.stores.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
+  } catch (e) {}
+  // Load benchmark products
+  try {
+    const resp = await api('/api/benchmark/products');
+    const data = await resp.json();
+    currentBenchmarkProducts = data.products || [];
+    renderBenchmarkCheckboxes();
+  } catch (e) {
+    document.getElementById('benchmarkCheckboxes').innerHTML = '<span style="color:var(--danger);">加载失败</span>';
+  }
+}
+function closeCreateTask() { document.getElementById('createTaskModal').classList.remove('show'); }
+function onTaskTypeChange() {
+  const type = document.getElementById('newTaskType').value;
+  document.getElementById('fieldCompetitor').style.display = type === 'competitor_scan' ? '' : 'none';
+  document.getElementById('taskItemsSection').style.display = type === 'self_check' ? 'none' : '';
+}
+
+function renderBenchmarkCheckboxes() {
+  const container = document.getElementById('benchmarkCheckboxes');
+  // Group by category
+  const cats = {};
+  for (const p of currentBenchmarkProducts) {
+    const cat = p.category || '其他';
+    if (!cats[cat]) cats[cat] = [];
+    cats[cat].push(p);
+  }
+  let html = '';
+  for (const [cat, items] of Object.entries(cats)) {
+    html += `<div style="color:var(--accent);font-size:11px;margin:8px 0 4px 0;font-weight:600;">${cat}</div>`;
+    for (const p of items) {
+      html += `<label style="display:inline-block;margin:2px 8px 2px 0;cursor:pointer;font-size:12px;">
+        <input type="checkbox" value="${p.product_name}" data-spec="${p.product_spec||''}" data-cat="${p.category||''}"> ${p.product_name} ${p.product_spec||''}
+      </label>`;
+    }
+  }
+  container.innerHTML = html || '<span style="color:var(--text-faint);">暂无对标商品（需先在系统中录入）</span>';
+}
+
+async function doCreateTask() {
+  const title = document.getElementById('newTaskTitle').value.trim();
+  if (!title) { alert('请填写任务标题'); return; }
+  // Gather selected items
+  const checks = document.querySelectorAll('#benchmarkCheckboxes input:checked');
+  const items = Array.from(checks).map(cb => ({
+    product_name: cb.value,
+    product_spec: cb.dataset.spec || '',
+    category: cb.dataset.cat || '',
+  }));
+  const body = {
+    store_id: document.getElementById('newTaskStore').value,
+    task_type: document.getElementById('newTaskType').value,
+    title: title,
+    description: document.getElementById('newTaskDesc').value.trim(),
+    competitor_store_name: document.getElementById('newTaskCompetitor').value.trim() || null,
+    deadline: document.getElementById('newTaskDeadline').value ? new Date(document.getElementById('newTaskDeadline').value).toISOString() : null,
+    items: items,
+  };
+  try {
+    const resp = await api('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
+    const data = await resp.json();
+    if (data.ok) {
+      closeCreateTask();
+      await loadTasks();
+    } else {
+      alert('创建失败: ' + (data.detail || JSON.stringify(data)));
+    }
+  } catch (e) { alert('创建失败: ' + e.message); }
+}
+
+async function openTaskDetail(taskId) {
+  currentTaskId = taskId;
+  document.getElementById('taskDetailModal').classList.add('show');
+  document.getElementById('uploadStatus').textContent = '';
+  try {
+    const resp = await api('/api/tasks/' + taskId);
+    const data = await resp.json();
+    const t = data.task;
+    document.getElementById('taskDetailTitle').textContent = t.title;
+    const statusMap = {pending:'⏳待开始', in_progress:'🔄进行中', submitted:'✅已提交', done:'✅已完成', expired:'⏰已超时'};
+    document.getElementById('taskDetailInfo').innerHTML = `
+      <div>状态: ${statusMap[t.status]||t.status} · 类型: ${t.task_type}</div>
+      <div>门店: ${t.store_name} · 竞品: ${t.competitor_store_name||'—'} · 截止: ${t.deadline?new Date(t.deadline).toLocaleString('zh-CN'):'—'}</div>
+      <div style="color:var(--text-dim);margin-top:4px;">${t.description||''}</div>
+    `;
+    // Items
+    const itemsDiv = document.getElementById('taskItemsList');
+    const doneMap = {'pending':'⬜','done':'✅','skipped':'⏭️'};
+    itemsDiv.innerHTML = data.items.map(it =>
+      `<div style="padding:4px 0;border-bottom:1px solid var(--border);">${doneMap[it.status]||'⬜'} ${it.product_name} ${it.product_spec||''} <span style="color:var(--text-faint);">${it.category||''}</span></div>`
+    ).join('') || '<span style="color:var(--text-faint);">无商品清单</span>';
+    // Uploads
+    const uploadsDiv = document.getElementById('taskUploadsList');
+    const ulStatusMap = {pending:'⏳排队', analyzing:'🔬分析中', done:'✅完成', failed:'❌失败'};
+    uploadsDiv.innerHTML = data.uploads.map(u =>
+      `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;">
+        ${ulStatusMap[u.status]||u.status} ${u.product_name||''} ${u.filename}
+        <span style="color:var(--text-faint);">${new Date(u.uploaded_at*1000).toLocaleString('zh-CN')} ${(u.file_size/1024/1024).toFixed(1)}MB</span>
+      </div>`
+    ).join('') || '<span style="color:var(--text-faint);">暂无上传记录</span>';
+  } catch (e) {
+    document.getElementById('taskDetailInfo').innerHTML = '<p style="color:var(--danger);">加载失败: ' + e.message + '</p>';
+  }
+}
+function closeTaskDetail() { document.getElementById('taskDetailModal').classList.remove('show'); }
+
+async function doUpload() {
+  const fileInput = document.getElementById('uploadFileInput');
+  const file = fileInput.files[0];
+  if (!file) { alert('请选择视频文件'); return; }
+  if (file.size > 50*1024*1024) { alert('文件不能超过50MB'); return; }
+  const statusEl = document.getElementById('uploadStatus');
+  statusEl.textContent = '上传中...';
+  const formData = new FormData();
+  formData.append('video_file', file);
+  try {
+    const headers = {};
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/tasks/' + currentTaskId + '/upload', { method: 'POST', body: formData, headers });
+    const data = await resp.json();
+    if (data.ok) {
+      statusEl.textContent = '✅ 上传成功！';
+      statusEl.style.color = 'var(--success)';
+      fileInput.value = '';
+      // Refresh detail
+      setTimeout(() => openTaskDetail(currentTaskId), 500);
+    } else {
+      statusEl.textContent = '❌ ' + (data.detail || '上传失败');
+      statusEl.style.color = 'var(--danger)';
+    }
+  } catch (e) {
+    statusEl.textContent = '❌ ' + e.message;
+    statusEl.style.color = 'var(--danger)';
+  }
 }
 
 // ===== Init =====
