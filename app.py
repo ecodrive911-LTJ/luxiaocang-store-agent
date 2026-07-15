@@ -18,7 +18,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
-from memory import build_memory_context, extract_and_save_memory, get_memory_summary
+from memory import (build_memory_context, extract_and_save_memory, get_memory_summary,
+                   build_preference_context, record_query, get_top_preferences)
 from product_analysis import (
     classify_products as pa_classify,
     category_gap_analysis as pa_category_gap,
@@ -303,6 +304,19 @@ def init_db():
         created_at REAL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_memory_store ON agent_memory(store_id, archived, importance)")
+
+    # D2-08: 用户偏好学习 —— 记录高频查询的「问题类型 + 品类/门店」
+    c.execute("""CREATE TABLE IF NOT EXISTS query_stats (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        category TEXT NOT NULL,
+        topic TEXT NOT NULL DEFAULT '',
+        count INTEGER DEFAULT 1,
+        first_at REAL,
+        updated_at REAL,
+        UNIQUE(store_id, category, topic)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_query_store ON query_stats(store_id, count)")
 
     conn.commit()
     conn.close()
@@ -736,6 +750,12 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
             raise HTTPException(status_code=403, detail="无权访问该门店")
 
     save_message("user", req.message, req.session_id, user_id, store_id)
+    # D2-08: 记录本次咨询的问题类型+主题（高频偏好学习，确定性分类，不调LLM）
+    if store_id:
+        try:
+            record_query(DB_PATH, store_id, req.message)
+        except Exception:
+            pass
     history = get_conversation_history(req.session_id, limit=10, user_id=user_id, store_id=store_id)
     log_audit(user, "chat", resource_type="conversation", resource_id=req.session_id,
               store_id=store_id, details={"message": req.message[:200]})
@@ -756,11 +776,13 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
 
     # D2-09: 注入门店长期画像 & Agent记忆（对话前召回）
     memory_context = build_memory_context(DB_PATH, store_id) if store_id else ""
+    # D2-08: 注入用户高频偏好引用（连续5次同类型后生效，调整AI回答优先级）
+    preference_context = build_preference_context(DB_PATH, store_id) if store_id else ""
 
     # 记忆写回时携带门店名（避免 stream_response 内重复查询）
     store_name_for_memory = store_info["name"] if (store_id and store_info) else ""
 
-    full_context = role_context + store_context + alert_context + memory_context
+    full_context = role_context + store_context + alert_context + memory_context + preference_context
 
     async def stream_response():
         full_reply = ""
@@ -933,6 +955,28 @@ async def memory_summary(store_id: str = None, user: dict = Depends(require_auth
     elif not get_store_by_id(DB_PATH, store_id, user_id):
         raise HTTPException(status_code=403, detail="无权访问该门店")
     return get_memory_summary(DB_PATH, store_id)
+
+
+@app.get("/api/memory/preferences")
+async def memory_preferences(store_id: str = None, threshold: int = 5,
+                             user: dict = Depends(require_auth)):
+    """D2-08: 返回门店用户高频咨询偏好（累计>=threshold次）。"""
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    owned = get_user_stores(DB_PATH, user_id)
+    if not store_id:
+        if owned:
+            store_id = owned[0]["id"]
+        else:
+            raise HTTPException(status_code=403, detail="未绑定门店")
+    if role == "store_owner":
+        if not any(s["id"] == store_id for s in owned):
+            raise HTTPException(status_code=403, detail="无权访问该门店")
+    elif not get_store_by_id(DB_PATH, store_id, user_id):
+        raise HTTPException(status_code=403, detail="无权访问该门店")
+    prefs = get_top_preferences(DB_PATH, store_id, threshold)
+    return {"store_id": store_id, "threshold": threshold, "preferences": prefs}
+
 
 @app.get("/api/conversations")
 async def conversations(session_id: str = "default", limit: int = 50, user: dict = Depends(require_auth)):

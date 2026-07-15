@@ -34,6 +34,7 @@
 | D2-06 | 选品规划+商品分层 | `bebaed2` | 2026-07-16 | 4大分析引擎+5个API+4个Agent工具 |
 | D2-07 | 数据看板可视化 | `686ea58` | 2026-07-16 | ECharts看板+单店/总部双视图+角色隔离+static挂载 |
 | D2-09 | 门店画像&长期记忆 | `a23c4a2` | 2026-07-16 | memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后流式LLM抽取写回 + /api/memory/summary端点；线上验证V2-08/V2-09通过(一次诊断对话写回4画像+4记忆) |
+| D2-08 | 用户偏好学习 | `pending` | 2026-07-16 | query_stats表 + classify_query(确定性关键词分类,不调LLM) + record_query(对话时记录) + get_top_preferences + build_preference_context(连续5次同类型后注入system prompt) + /api/memory/preferences端点；线上验证V2-07通过 |
 
 ---
 
@@ -42,7 +43,7 @@
 | 优先级 | 编号 | 任务 | 预估 | 类型 | 依赖 | 说明 |
 |--------|------|------|------|------|------|------|
 | P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | ✅ 已完成（线上验证通过 V2-08/V2-09） |
-| P1 | D2-08 | 用户偏好学习 | 2天 | 后端 | D2-09 | 记录高频查询→调整AI回答优先级 |
+| P1 | D2-08 | 用户偏好学习 | 2天 | 后端 | D2-09 | ✅ 已完成（线上验证通过 V2-07，确定性关键词分类，不增加LLM负担） |
 | P2 | D2-04 | 小程序核心页面 | 7天 | 前端 | 微信注册 | 首页/任务页/AI咨询页/我的 |
 | P2 | D2-10 | 微信小程序上线 | 3天 | 运维 | D2-04 | 提交审核+域名白名单+灰度发布 |
 | P2 | — | 选址评估工作流 | — | 后端 | 无 | 高德API→POI扫描→竞品密度→评分 |
@@ -87,3 +88,4 @@
 - **2026-07-16**：D2-07完成。新增analytics.py(307行)+2个聚合API+ECharts看板前端。修复require_auth的user键(user_id非id)。下一步：D2-09门店画像。
 - **2026-07-16**：D2-09门店画像&长期记忆已实现（代码层）。新增memory.py（召回build_memory_context + 对话后LLM抽取写回extract_and_save_memory + 查询get_memory_summary）；app.py的init_db新增store_profiles/agent_memory两表（store_id TEXT匹配UUID）；chat与proactive_opening端点注入画像上下文；对话结束触发抽取写回。新增GET /api/memory/summary。逻辑自测(_test_memory.py)全过。待部署阿里云+真实对话验证V2-08/V2-09。下一步：D2-08用户偏好学习。
 - **2026-07-16**：D2-09线上验证+修复。初版抽取用非流式call_llm_raw(timeout=90)且prompt schema与解析器不匹配→真实对话写回0条。修复：①抽取改用流式call_llm_stream(首token秒回，整体~30s vs 非流式~90s，快3倍)；②重写抽取prompt强制严格键名(profile_type/content/confidence、memory_type/summary/importance)并禁止其它键名；③解析器加类型归一化(_PROFILE_TYPE_ALIAS/_MEMORY_TYPE_ALIAS)容忍id/type/name/subject_id等异构键；④持久化(save_message+抽取)改为脱离请求生命周期的asyncio后台任务，客户端SSE超时/刷新断开也不丢记忆。线上验证：一次诊断对话(405字)→抽取写回4画像+4记忆(V2-09 PASS)，二次对话召回注入正常(V2-08 PASS)。下一步：D2-08用户偏好学习。
+- **2026-07-16**：D2-08用户偏好学习完成(commit待填)。新增query_stats表(store_id/category/topic/count唯一约束)；memory.py加classify_query(确定性中文关键词分类问题类型+品类/门店主题，不调LLM避免端点限流)、record_query(对话时累加计数)、get_top_preferences(>=阈值返回)、build_preference_context(连续5次同类型后生成偏好引用块)；app.py在chat端点save_message后record_query，并把preference_context拼入system prompt，新增GET /api/memory/preferences。线上验证V2-07：发1次定价对话确认record_query接线(计数=1)，补种到5后第2次对话AI回复优先聚焦定价(可口可乐错价)，偏好注入生效。清理测试数据。下一步：剩余后端任务(D2-06/07/08/09)均已完成，仅剩小程序相关(D2-04/D2-10)需微信注册等外部依赖。

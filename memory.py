@@ -156,6 +156,114 @@ def build_memory_context(db_path, store_id: Optional[str], record_recall: bool =
         return ""
 
 
+# ===================== 用户偏好学习（D2-08） =====================
+# 说明：用「确定性关键词分类」而非额外 LLM 调用，避免给本就速率受限的
+# 火山引擎端点增加负担。记录用户高频咨询的「问题类型 + 品类/门店」，
+# 当某类咨询累计 >= 阈值(默认5) 时，把偏好引用注入 system prompt，
+# 让 AI 回答优先照顾该维度（验收 V2-07）。
+
+CATEGORY_LABELS = {
+    "pricing": "定价/调价",
+    "selection": "选品/商品结构",
+    "competitor": "竞品比价",
+    "supply": "供应链/库存",
+    "siting": "选址/建店",
+    "analytics": "数据看板",
+    "alert": "异常巡检",
+    "general": "综合经营",
+}
+
+_CATEGORY_KEYWORDS = {
+    "pricing":     ["定价", "调价", "价格", "毛利", "加价", "利润", "促销价", "价签", "降价", "涨价", "标价", "客单价"],
+    "selection":   ["选品", "分层", "引流", "利润品", "长尾", "滞销", "搭售", "关联", "品类", "商品结构", "淘汰", "动销"],
+    "competitor":  ["竞品", "比价", "小柴购", "厉臣", "对手", "同行"],
+    "supply":      ["补货", "库存", "供应链", "进货", "采购", "缺货", "周转", "仓配"],
+    "siting":      ["选址", "建店", "开店", "商圈", "铺位", "点位"],
+    "analytics":   ["看板", "报表", "数据", "指标", "KPI", "销售额", "营业额", "营收", "毛利额"],
+    "alert":       ["异常", "告警", "巡检", "预警", "缺货告警"],
+}
+_TOPIC_KEYWORDS = ["饮料", "零食", "乳品", "酒水", "方便食品", "生鲜", "日百",
+                   "纸品", "洗护", "烟草", "冰品", "调味", "面包", "饼干", "膨化"]
+
+
+def classify_query(message: str):
+    """确定性地把一条用户咨询分类为 (问题类型, 品类/门店主题)。"""
+    if not message:
+        return "general", ""
+    # 主题：优先品类，其次门店名
+    topic = ""
+    for kw in _TOPIC_KEYWORDS:
+        if kw in message:
+            topic = kw
+            break
+    if not topic:
+        for name in ("广安", "财富", "承德"):
+            if name in message:
+                topic = name + "店"
+                break
+    # 问题类型：命中关键词最多的类别
+    best, best_n = "general", 0
+    for cat, kws in _CATEGORY_KEYWORDS.items():
+        n = sum(1 for k in kws if k in message)
+        if n > best_n:
+            best, best_n = cat, n
+    return best, topic
+
+
+def record_query(db_path, store_id: str, message: str):
+    """记录一次用户咨询的问题类型+主题，用于偏好学习（幂等累加）。"""
+    if not store_id:
+        return
+    category, topic = classify_query(message)
+    now = time.time()
+    try:
+        conn = _conn(db_path)
+        conn.execute(
+            """INSERT INTO query_stats (store_id, category, topic, count, first_at, updated_at)
+               VALUES (?,?,?,1,?,?)
+               ON CONFLICT(store_id, category, topic) DO UPDATE SET
+                 count = count + 1, updated_at = excluded.updated_at""",
+            (store_id, category, topic, now, now),
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
+def get_top_preferences(db_path, store_id: str, threshold: int = 5) -> list:
+    """返回累计咨询次数 >= threshold 的高频偏好（按次数降序）。"""
+    try:
+        conn = _conn(db_path)
+        rows = conn.execute(
+            "SELECT category, topic, count FROM query_stats "
+            "WHERE store_id=? AND count>=? ORDER BY count DESC LIMIT 5",
+            (store_id, threshold),
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+def build_preference_context(db_path, store_id: str, threshold: int = 5) -> str:
+    """生成拼入 system prompt 的用户偏好引用块；未达阈值返回空串。"""
+    if not store_id:
+        return ""
+    prefs = get_top_preferences(db_path, store_id, threshold)
+    if not prefs:
+        return ""
+    lines = ["\n\n## 用户偏好（基于历史高频咨询沉淀，回答请优先照顾这些维度）"]
+    for p in prefs:
+        cat_label = CATEGORY_LABELS.get(p["category"], p["category"])
+        topic_txt = f"「{p['topic']}」" if p["topic"] else ""
+        lines.append(
+            f"- 您常关注{topic_txt}{cat_label}（累计 {p['count']} 次咨询），"
+            f"回答时优先结合本店相关数据，主动给出可执行建议"
+        )
+    return "\n".join(lines)
+
+
 # ===================== 写入（对话后） =====================
 
 def _upsert_profile(db_path, store_id: str, profile_type: str, content: str,
