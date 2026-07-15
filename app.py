@@ -1264,6 +1264,83 @@ async def get_price_summary(store_id: str = None, user: dict = Depends(require_a
     return {"summary": rows}
 
 
+@app.get("/api/price/matrix")
+async def price_matrix(store_id: str = None, user: dict = Depends(require_auth)):
+    """D3-2 比价矩阵 + 三档定价建议
+    聚合某门店的竞品采集价，给出每个商品的竞品价格分布与低/中/高三档建议定价。
+    """
+    user_role = user["role"]
+    if not store_id:
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        if not user_stores:
+            return {"matrix": [], "store_id": None}
+        store_id = user_stores[0]["id"]
+    if user_role == "store_owner":
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        if store_id not in [s["id"] for s in user_stores]:
+            raise HTTPException(status_code=403, detail="无权查看该门店")
+
+    store = db_query("SELECT name FROM stores WHERE id=?", (store_id,), fetch="one")
+    store_name = store["name"] if store else ""
+    # 本店价标记：competitor_store 含 '本店'/'我店'/门店名
+    own_markers = ["本店", "我店", store_name]
+
+    rows = db_query(
+        "SELECT product_name, product_spec, competitor_store, price, has_promotion, promotion_desc, captured_at FROM price_data WHERE store_id=? ORDER BY product_name, captured_at DESC",
+        (store_id,), fetch="all"
+    )
+
+    # 按商品聚合
+    groups = {}
+    for r in rows:
+        key = (r["product_name"], r["product_spec"] or "")
+        groups.setdefault(key, []).append(r)
+
+    matrix = []
+    for (pname, pspec), recs in sorted(groups.items()):
+        competitor_prices = [r["price"] for r in recs
+                             if not any(mk and mk in (r["competitor_store"] or "") for mk in own_markers)]
+        own_recs = [r for r in recs
+                    if any(mk and mk in (r["competitor_store"] or "") for mk in own_markers)]
+        own_price = own_recs[0]["price"] if own_recs else None
+        if competitor_prices:
+            cp_min = min(competitor_prices)
+            cp_max = max(competitor_prices)
+            cp_avg = round(sum(competitor_prices) / len(competitor_prices), 2)
+            # 三档定价建议
+            tier_low = round(cp_min, 2)                      # 引流档：贴最低价抢客流
+            tier_mid = round(cp_avg, 2)                      # 利润档：跟均价
+            tier_high = round(cp_max * 1.03, 2)              # 形象/毛利档：略高于最高
+            # 我方位次
+            if own_price is not None:
+                below = sum(1 for p in competitor_prices if p > own_price)
+                rank_pct = round(below / len(competitor_prices) * 100)
+            else:
+                rank_pct = None
+        else:
+            cp_min = cp_max = cp_avg = tier_low = tier_mid = tier_high = None
+            rank_pct = None
+        matrix.append({
+            "product_name": pname,
+            "product_spec": pspec,
+            "own_price": own_price,
+            "competitor_count": len(competitor_prices),
+            "competitor_min": cp_min,
+            "competitor_avg": cp_avg,
+            "competitor_max": cp_max,
+            "tier_low": tier_low,
+            "tier_mid": tier_mid,
+            "tier_high": tier_high,
+            "rank_pct": rank_pct,
+            "competitors": [
+                {"store": r["competitor_store"], "price": r["price"],
+                 "promo": r["promotion_desc"] if r["has_promotion"] else None}
+                for r in recs
+            ],
+        })
+    return {"matrix": matrix, "store_id": store_id, "store_name": store_name}
+
+
 # ===== 内置对标商品清单 =====
 
 def get_default_benchmark():

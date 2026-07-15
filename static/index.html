@@ -553,6 +553,7 @@ body {
       <option value="">选择门店</option>
     </select>
     <button class="topbar-btn" id="btnTasks" onclick="openTaskMgmt()" style="display:none;">📋 任务</button>
+    <button class="topbar-btn" id="btnPrice" onclick="openPriceMatrix()" style="display:none;">💰 比价矩阵</button>
     <button class="topbar-btn" id="btnSettings" onclick="openConfig()" style="display:none;">⚙️ 设置</button>
     <button class="topbar-btn" id="btnUsers" onclick="openUserMgmt()" style="display:none;">👥 用户</button>
     <button class="topbar-btn" onclick="logout()">🚪 登出</button>
@@ -860,6 +861,19 @@ body {
   </div>
 </div>
 
+<!-- 比价矩阵模态框 (D3-2) -->
+<div class="modal-overlay" id="priceMatrixModal">
+  <div class="modal" style="width:820px;max-height:88vh;overflow-y:auto;">
+    <h2>💰 比价矩阵 · 三档定价建议</h2>
+    <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">门店：<span id="priceMatrixStore">—</span> · 绿色=引流档 蓝色=利润档 橙色=形象档</div>
+    <div id="priceMatrixTable" style="font-size:12px;"></div>
+    <div class="modal-actions" style="margin-top:12px;">
+      <button class="modal-btn" onclick="closePriceMatrix()">关闭</button>
+      <button class="modal-btn primary" onclick="openPriceMatrix()">🔄 刷新</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Auth State =====
 let token = localStorage.getItem('lxc_token') || '';
@@ -1017,14 +1031,17 @@ function renderRoleBasedUI(role, stores) {
     document.getElementById('btnTasks').style.display = '';
     document.getElementById('btnSettings').style.display = '';
     document.getElementById('btnUsers').style.display = '';
+    document.getElementById('btnPrice').style.display = '';
   } else if (isManager) {
     document.getElementById('btnTasks').style.display = '';
     document.getElementById('btnSettings').style.display = '';
     document.getElementById('btnUsers').style.display = 'none';
+    document.getElementById('btnPrice').style.display = '';
   } else {
     document.getElementById('btnTasks').style.display = '';
     document.getElementById('btnSettings').style.display = 'none';
     document.getElementById('btnUsers').style.display = 'none';
+    document.getElementById('btnPrice').style.display = 'none';
   }
 
   // === Region 2: Store Selector ===
@@ -1603,6 +1620,47 @@ async function confirmUploadReview() {
   alert('已确认提交');
   if (currentTaskId) loadTaskDetail(currentTaskId);
 }
+
+// ===== 比价矩阵 (D3-2) =====
+function openPriceMatrix() {
+  const sid = document.getElementById('storeSelector').value || '';
+  document.getElementById('priceMatrixModal').classList.add('show');
+  document.getElementById('priceMatrixTable').innerHTML = '<p style="color:var(--text-dim);">加载中...</p>';
+  api('/api/price/matrix' + (sid ? '?store_id=' + encodeURIComponent(sid) : '')).then(d => {
+    document.getElementById('priceMatrixStore').textContent = d.store_name || d.store_id || '全部';
+    const m = d.matrix || [];
+    if (!m.length) {
+      document.getElementById('priceMatrixTable').innerHTML = '<p style="color:var(--text-faint);">暂无比价数据。请先通过任务采集竞品价格。</p>';
+      return;
+    }
+    let html = '<table style="width:100%;border-collapse:collapse;">'
+      + '<tr style="background:var(--bg-2);text-align:left;">'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">商品</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">我店价</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">竞品区间</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">低(引流)</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">中(利润)</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">高(形象)</th>'
+      + '<th style="padding:6px;border-bottom:1px solid var(--border);">位次</th></tr>';
+    for (const r of m) {
+      const ownCls = r.rank_pct!==null ? (r.rank_pct>=60?'color:var(--success)':r.rank_pct<=30?'color:var(--danger)':'color:var(--text)') : '';
+      html += '<tr style="border-bottom:1px solid var(--border);">'
+        + `<td style="padding:6px;">${r.product_name}${r.product_spec?' <span style="color:var(--text-faint);">'+r.product_spec+'</span>':''}</td>`
+        + `<td style="padding:6px;${ownCls}">${r.own_price!=null?('¥'+r.own_price):'—'}</td>`
+        + `<td style="padding:6px;color:var(--text-dim);">${r.competitor_min!=null?('¥'+r.competitor_min+'~¥'+r.competitor_max+' ('+r.competitor_count+')'):'无'}</td>`
+        + `<td style="padding:6px;color:var(--success);font-weight:600;">${r.tier_low!=null?('¥'+r.tier_low):'—'}</td>`
+        + `<td style="padding:6px;color:#4aa8ff;font-weight:600;">${r.tier_mid!=null?('¥'+r.tier_mid):'—'}</td>`
+        + `<td style="padding:6px;color:#ff9f43;font-weight:600;">${r.tier_high!=null?('¥'+r.tier_high):'—'}</td>`
+        + `<td style="padding:6px;">${r.rank_pct!=null?(r.rank_pct+'% 低于竞品'):'—'}</td>`
+        + '</tr>';
+    }
+    html += '</table>';
+    document.getElementById('priceMatrixTable').innerHTML = html;
+  }).catch(e => {
+    document.getElementById('priceMatrixTable').innerHTML = '<p style="color:var(--danger);">加载失败: ' + e.message + '</p>';
+  });
+}
+function closePriceMatrix() { document.getElementById('priceMatrixModal').classList.remove('show'); }
 
 async function doUpload() {
   const fileInput = document.getElementById('uploadFileInput');
