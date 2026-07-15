@@ -34,7 +34,7 @@
 | D2-06 | 选品规划+商品分层 | `bebaed2` | 2026-07-16 | 4大分析引擎+5个API+4个Agent工具 |
 | D2-07 | 数据看板可视化 | `686ea58` | 2026-07-16 | ECharts看板+单店/总部双视图+角色隔离+static挂载 |
 | D2-09 | 门店画像&长期记忆 | `a23c4a2` | 2026-07-16 | memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后流式LLM抽取写回 + /api/memory/summary端点；线上验证V2-08/V2-09通过(一次诊断对话写回4画像+4记忆) |
-| D2-08 | 用户偏好学习 | `pending` | 2026-07-16 | query_stats表 + classify_query(确定性关键词分类,不调LLM) + record_query(对话时记录) + get_top_preferences + build_preference_context(连续5次同类型后注入system prompt) + /api/memory/preferences端点；线上验证V2-07通过 |
+| D2-08 | 用户偏好学习 | `281d453` | 2026-07-16 | query_stats表 + classify_query(确定性关键词分类,不调LLM) + record_query(对话时记录) + get_top_preferences + build_preference_context(连续5次同类型后注入system prompt) + /api/memory/preferences端点；线上验证V2-07通过 |
 
 ---
 
