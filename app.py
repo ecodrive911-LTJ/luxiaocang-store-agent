@@ -1318,7 +1318,7 @@ async def get_price_summary(store_id: str = None, user: dict = Depends(require_a
 
 
 @app.get("/api/price/matrix")
-async def price_matrix(store_id: str = None, user: dict = Depends(require_auth)):
+async def price_matrix(store_id: str = None, user: dict = Depends(require_role("manager"))):
     """D3-2 比价矩阵 + 三档定价建议
     聚合某门店的竞品采集价，给出每个商品的竞品价格分布与低/中/高三档建议定价。
     """
