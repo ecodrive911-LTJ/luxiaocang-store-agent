@@ -13,6 +13,7 @@
 """
 
 import json
+import os
 import asyncio
 import httpx
 import time
@@ -186,7 +187,14 @@ async def agent_loop(user_message: str, history: list, config: dict, max_iterati
 - 简洁有力，不废话
 - 回答控制在300字以内，重点突出，不要长篇大论
 - 用要点和短句，不用大段落
-"""
+
+## 选品分析能力（D2-06）
+当用户询问选品、商品分层、品类分析、滞销品、搭售等问题时，主动使用以下工具：
+- classify_products: 商品分层(引流品/利润品/常规品/长尾品)
+- category_gap_analysis: 两店SKU差异对比
+- identify_slow_moving: 滞销品识别+淘汰建议
+- basket_analysis: 购物篮关联+搭售陈列建议
+调用时需要store_id参数，可从list_stores获取门店列表。"""
 
     messages = [{"role": "system", "content": system_prompt}] + history + [{"role": "user", "content": user_message}]
 
@@ -272,14 +280,33 @@ def get_time():
 
 @register_tool(
     name="list_stores",
-    description="列出所有门店及其SKU数量",
+    description="列出所有门店及其SKU数量和store_id（用于选品分析工具的参数）",
     parameters={}
 )
 def list_stores():
-    return json.dumps([
-        {"name": "鹿小仓广安店", "sku": 2941, "file": "knowledge/stores/鹿小仓广安店_库存合并总表.xlsx"},
-        {"name": "鹿小仓财富店", "sku": 1386, "file": "knowledge/stores/鹿小仓财富店_库存合并总表.xlsx"},
-    ], ensure_ascii=False)
+    # 尝试从数据库获取门店列表
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    stores = []
+    try:
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+        for row in c.execute("SELECT id, name, address FROM stores"):
+            stores.append({"store_id": row[0], "name": row[1], "address": row[2] or ""})
+        conn.close()
+    except Exception:
+        pass
+    # 补充SKU数量（已知数据）
+    sku_map = {"鹿小仓广安店": 2941, "鹿小仓财富店": 1386}
+    for s in stores:
+        s["sku"] = sku_map.get(s["name"], "?")
+    if not stores:
+        # Fallback: 静态数据
+        stores = [
+            {"store_id": "", "name": "鹿小仓广安店", "sku": 2941, "address": "承德双桥区广安购物中心"},
+            {"store_id": "", "name": "鹿小仓财富店", "sku": 1386, "address": "承德双滦区财富广场"},
+        ]
+    return json.dumps(stores, ensure_ascii=False)
 
 
 @register_tool(
@@ -329,3 +356,61 @@ async def run_script(script_name: str, args: str = ""):
         return "⚠️ 脚本执行超时（120秒）"
     except Exception as e:
         return f"⚠️ 执行失败: {str(e)}"
+
+
+# ===== D2-06 选品规划+商品分层工具 =====
+
+@register_tool(
+    name="classify_products",
+    description="商品自动分层分析：按品类×价格带×毛利率将商品分为引流品(traffic)/利润品(profit)/常规品(regular)/长尾品(long_tail)。返回每类数量、占比和示例商品。",
+    parameters={
+        "store_id": "门店ID（从list_stores获取）"
+    }
+)
+def classify_products_tool(store_id: str):
+    from product_analysis import classify_products
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    result = classify_products(db_path, store_id)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@register_tool(
+    name="category_gap_analysis",
+    description="品类差异分析：对比本店与另一门店的SKU差异，找出对方有本店没有的商品、本店独有的商品、各品类SKU数量对比。",
+    parameters={
+        "store_id": "门店ID"
+    }
+)
+def category_gap_tool(store_id: str):
+    from product_analysis import category_gap_analysis
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    result = category_gap_analysis(db_path, store_id)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@register_tool(
+    name="identify_slow_moving",
+    description="滞销品识别：基于价格偏离品类均价、超高加价率、长尾品类等规则识别潜在滞销品，给出淘汰/促销建议。",
+    parameters={
+        "store_id": "门店ID"
+    }
+)
+def slow_moving_tool(store_id: str):
+    from product_analysis import identify_slow_moving
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    result = identify_slow_moving(db_path, store_id)
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@register_tool(
+    name="basket_analysis",
+    description="购物篮关联分析：基于品类互补性给出搭售陈列建议（如饮料配零食）。后续接入POS数据可升级为精确关联规则。",
+    parameters={
+        "store_id": "门店ID"
+    }
+)
+def basket_analysis_tool(store_id: str):
+    from product_analysis import basket_analysis
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
+    result = basket_analysis(db_path, store_id)
+    return json.dumps(result, ensure_ascii=False, default=str)

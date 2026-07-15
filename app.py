@@ -18,6 +18,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
+from product_analysis import (
+    classify_products as pa_classify,
+    category_gap_analysis as pa_category_gap,
+    identify_slow_moving as pa_slow_moving,
+    basket_analysis as pa_basket,
+    full_analysis as pa_full,
+)
 from auth import (
     hash_password, verify_password, create_session, verify_session,
     invalidate_session, get_user_stores, get_store_by_id, extract_token,
@@ -935,6 +942,64 @@ async def add_benchmark_product(req: dict, user: dict = Depends(require_role("ma
         (pid, req.get("product_name"), req.get("product_spec"), req.get("product_barcode"), req.get("category"), req.get("product_role", "regular"), now)
     )
     return {"ok": True, "id": pid}
+
+
+# ===== D2-06 选品规划+商品分层 =====
+
+@app.get("/api/products/classify")
+async def api_classify_products(store_id: str, user: dict = Depends(require_auth)):
+    """商品自动分层：traffic/profit/regular/long_tail"""
+    try:
+        result = pa_classify(DB_PATH, store_id)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {e}")
+
+@app.get("/api/products/category-gap")
+async def api_category_gap(store_id: str, user: dict = Depends(require_auth)):
+    """品类差异分析：本店vs另一店的SKU差异"""
+    try:
+        result = pa_category_gap(DB_PATH, store_id)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {e}")
+
+@app.get("/api/products/slow-moving")
+async def api_slow_moving(store_id: str, user: dict = Depends(require_auth)):
+    """滞销品识别：基于价格偏离度+加价率+品类占比"""
+    try:
+        result = pa_slow_moving(DB_PATH, store_id)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {e}")
+
+@app.get("/api/products/basket-analysis")
+async def api_basket_analysis(store_id: str, user: dict = Depends(require_auth)):
+    """购物篮关联分析：品类互补搭售建议"""
+    try:
+        result = pa_basket(DB_PATH, store_id)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {e}")
+
+@app.get("/api/products/full-analysis")
+async def api_full_analysis(store_id: str, user: dict = Depends(require_auth)):
+    """一键完整选品分析报告"""
+    try:
+        result = pa_full(DB_PATH, store_id)
+        return result
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"分析失败: {e}")
 
 
 # ===== 任务管理接口 =====
