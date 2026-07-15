@@ -33,6 +33,7 @@
 | — | 仓库清理 | `0e37638` | 2026-07-16 | 删除30个临时脚本，.gitignore加`_*`规则 |
 | D2-06 | 选品规划+商品分层 | `bebaed2` | 2026-07-16 | 4大分析引擎+5个API+4个Agent工具 |
 | D2-07 | 数据看板可视化 | `686ea58` | 2026-07-16 | ECharts看板+单店/总部双视图+角色隔离+static挂载 |
+| D2-09 | 门店画像&长期记忆 | — | 2026-07-16 | 新增memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后LLM抽取写回 + /api/memory/summary端点 |
 
 ---
 
@@ -40,7 +41,7 @@
 
 | 优先级 | 编号 | 任务 | 预估 | 类型 | 依赖 | 说明 |
 |--------|------|------|------|------|------|------|
-| P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | store_profiles表 + agent_memory + 对话前召回 + 诊断后写入 |
+| P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | ✅ 已实现，待线上验证（见变更记录） |
 | P1 | D2-08 | 用户偏好学习 | 2天 | 后端 | D2-09 | 记录高频查询→调整AI回答优先级 |
 | P2 | D2-04 | 小程序核心页面 | 7天 | 前端 | 微信注册 | 首页/任务页/AI咨询页/我的 |
 | P2 | D2-10 | 微信小程序上线 | 3天 | 运维 | D2-04 | 提交审核+域名白名单+灰度发布 |
@@ -84,3 +85,4 @@
 - **2026-07-16**：创建任务看板。阶段1全部完成，阶段2已完成D2-01/D2-02/D2-03/D2-05/F1/F2/F4。下一步：D2-06选品规划、D2-07数据看板。
 - **2026-07-16**：D2-06完成。新增product_analysis.py(453行)+5个API端点+4个Agent工具。下一步：D2-07数据看板。
 - **2026-07-16**：D2-07完成。新增analytics.py(307行)+2个聚合API+ECharts看板前端。修复require_auth的user键(user_id非id)。下一步：D2-09门店画像。
+- **2026-07-16**：D2-09门店画像&长期记忆已实现（代码层）。新增memory.py（召回build_memory_context + 对话后LLM抽取写回extract_and_save_memory + 查询get_memory_summary）；app.py的init_db新增store_profiles/agent_memory两表（store_id TEXT匹配UUID）；chat与proactive_opening端点注入画像上下文；对话结束触发抽取写回。新增GET /api/memory/summary。逻辑自测(_test_memory.py)全过。待部署阿里云+真实对话验证V2-08/V2-09。下一步：D2-08用户偏好学习。

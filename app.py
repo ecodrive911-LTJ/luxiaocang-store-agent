@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
+from memory import build_memory_context, extract_and_save_memory, get_memory_summary
 from product_analysis import (
     classify_products as pa_classify,
     category_gap_analysis as pa_category_gap,
@@ -272,6 +273,36 @@ def init_db():
         created_at REAL
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_msg_store_time ON message_queue(store_id, created_at)")
+
+    # ===== D2-09 门店画像 & Agent长期记忆 =====
+    c.execute("""CREATE TABLE IF NOT EXISTS store_profiles (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        profile_type TEXT NOT NULL,
+        content_json TEXT NOT NULL,
+        content_key TEXT,
+        confidence REAL DEFAULT 0.5,
+        source TEXT,
+        last_updated REAL,
+        created_at REAL,
+        UNIQUE(store_id, profile_type, content_key)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_profiles_store ON store_profiles(store_id, profile_type)")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS agent_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        memory_type TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        detail_json TEXT,
+        source_conversation_id TEXT,
+        importance INTEGER DEFAULT 1,
+        last_recalled_at REAL,
+        recall_count INTEGER DEFAULT 0,
+        archived INTEGER DEFAULT 0,
+        created_at REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_memory_store ON agent_memory(store_id, archived, importance)")
 
     conn.commit()
     conn.close()
@@ -723,7 +754,13 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
     # D2-05: 注入最新告警上下文，让AI在对话中主动引用
     alert_context = _get_alert_context(user, store_id)
 
-    full_context = role_context + store_context + alert_context
+    # D2-09: 注入门店长期画像 & Agent记忆（对话前召回）
+    memory_context = build_memory_context(DB_PATH, store_id) if store_id else ""
+
+    # 记忆写回时携带门店名（避免 stream_response 内重复查询）
+    store_name_for_memory = store_info["name"] if (store_id and store_info) else ""
+
+    full_context = role_context + store_context + alert_context + memory_context
 
     async def stream_response():
         full_reply = ""
@@ -732,6 +769,14 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
                 full_reply += chunk
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
             save_message("assistant", full_reply, req.session_id, user_id, store_id)
+            # D2-09: 对话结束，LLM抽取结构化记忆落库（后台动作，异常不阻断主链路）
+            if store_id and full_reply.strip():
+                try:
+                    await extract_and_save_memory(
+                        DB_PATH, store_id, req.message, full_reply, config,
+                        session_id=req.session_id, store_name=store_name_for_memory)
+                except Exception:
+                    pass
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -800,6 +845,10 @@ async def proactive_opening(user: dict = Depends(require_auth)):
 
     # 构建开场白生成 prompt
     role_label = ROLES.get(role, {}).get("label", role)
+
+    # D2-09: 注入门店长期画像，让主动开场也能引用历史认知
+    memory_ctx = build_memory_context(DB_PATH, store_id) if store_id else ""
+
     opening_prompt = f"""你是「鹿小仓」，一个便利店经营决策Agent。现在用户刚打开对话窗口，你需要生成一句主动开场白。
 
 ## 当前用户
@@ -809,6 +858,7 @@ async def proactive_opening(user: dict = Depends(require_auth)):
 ## 最新巡检告警
 {alerts_brief if alerts_brief.strip() else "（暂无告警）"}
 {price_summary}
+{memory_ctx}
 
 ## 开场白要求
 1. 如果有告警：直接引用最紧急的告警内容，用具体数字说话（如"可口可乐比竞品贵0.8元"），并给出初步建议
@@ -842,6 +892,25 @@ async def list_tools():
             for t in TOOLS.values()
         ]
     }
+
+
+@app.get("/api/memory/summary")
+async def memory_summary(store_id: str = None, user: dict = Depends(require_auth)):
+    """D2-09: 返回门店画像/记忆概览 + 注入system prompt的上下文文本（用于验证V2-08）"""
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    owned = get_user_stores(DB_PATH, user_id)
+    if not store_id:
+        if owned:
+            store_id = owned[0]["id"]
+        else:
+            raise HTTPException(status_code=403, detail="未绑定门店")
+    if role == "store_owner":
+        if not any(s["id"] == store_id for s in owned):
+            raise HTTPException(status_code=403, detail="无权访问该门店")
+    elif not get_store_by_id(DB_PATH, store_id, user_id):
+        raise HTTPException(status_code=403, detail="无权访问该门店")
+    return get_memory_summary(DB_PATH, store_id)
 
 @app.get("/api/conversations")
 async def conversations(session_id: str = "default", limit: int = 50, user: dict = Depends(require_auth)):
