@@ -197,6 +197,11 @@ def init_db():
         c.execute("ALTER TABLE collect_uploads ADD COLUMN file_md5 TEXT")
     except Exception:
         pass  # 列已存在
+    # 尝试追加 retry_count 列（旧表兼容）
+    try:
+        c.execute("ALTER TABLE collect_uploads ADD COLUMN retry_count INTEGER DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     c.execute("""CREATE TABLE IF NOT EXISTS price_data (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -244,6 +249,21 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_logs(user_id, created_at)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)")
+
+    # 消息队列（D2-01 AI主动巡检推送）
+    c.execute("""CREATE TABLE IF NOT EXISTS message_queue (
+        id TEXT PRIMARY KEY,
+        store_id TEXT,
+        user_id TEXT,
+        level TEXT DEFAULT 'info',
+        title TEXT NOT NULL,
+        body TEXT,
+        related_type TEXT,
+        related_id TEXT,
+        is_read INTEGER DEFAULT 0,
+        created_at REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_msg_store_time ON message_queue(store_id, created_at)")
 
     conn.commit()
     conn.close()
@@ -854,6 +874,8 @@ async def create_task(req: CreateTaskRequest, user: dict = Depends(require_role(
             )
             items_added += 1
 
+    log_audit(user, "create_task", resource_type="task", resource_id=task_id,
+              store_id=req.store_id, details={"title": req.title, "items": items_added})
     return {
         "ok": True,
         "task": {
@@ -1091,32 +1113,51 @@ async def analyze_upload_video(upload_id: str, file_path: str, product_name: str
     while attempt <= MAX_RETRY:
         attempt += 1
         try:
-            # Step 1: 尝试运行 video_pipeline.py 抽帧+OCR
-            pipeline_script = str(SCRIPTS_DIR / "video_pipeline.py")
-            cmd = [sys.executable, pipeline_script, file_path]
+            # Step 1: 调用单视频解析器（抽帧+OCR+价格提取）
+            analyzer_script = str(SCRIPTS_DIR / "analyze_video.py")
+            cmd = [sys.executable, analyzer_script, file_path, product_name or ""]
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-            stdout_text = stdout.decode('utf-8', errors='replace')[-4000:]
+            stdout_text = stdout.decode('utf-8', errors='replace')
             stderr_text = stderr.decode('utf-8', errors='replace')[-1000:]
 
             if proc.returncode == 0:
-                # Pipeline 成功
-                result_json = json.dumps({
-                    "method": "video_pipeline",
-                    "success": True,
-                    "stdout": stdout_text[:3000],
-                    "product_name": product_name,
-                }, ensure_ascii=False)
-                db_exec(
-                    "UPDATE collect_uploads SET status='done', result_json=?, analyzed_at=?, retry_count=? WHERE id=?",
-                    (result_json, time.time(), attempt, upload_id)
-                )
-                return
+                # 解析解析器输出（取最后一段 JSON）
+                parsed = None
+                for line in reversed(stdout_text.strip().splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        try:
+                            parsed = json.loads(line)
+                            break
+                        except Exception:
+                            parsed = None
+                if parsed and parsed.get("success"):
+                    # 写入 price_data（核心闭环 V1-6）
+                    await _write_price_data(upload_id, product_name, parsed)
+                    result_json = json.dumps({
+                        "method": "rapidocr",
+                        "success": True,
+                        "product_name": parsed.get("product_name") or product_name,
+                        "detected_price": parsed.get("detected_price"),
+                        "product_spec": parsed.get("product_spec"),
+                        "promotion_desc": parsed.get("promotion_desc"),
+                        "has_promotion": parsed.get("has_promotion", 0),
+                        "confidence": parsed.get("confidence", 0),
+                    }, ensure_ascii=False)
+                    db_exec(
+                        "UPDATE collect_uploads SET status='done', result_json=?, analyzed_at=?, retry_count=? WHERE id=?",
+                        (result_json, time.time(), attempt, upload_id)
+                    )
+                    return
+                else:
+                    last_error = f"解析器未返回有效JSON: {stdout_text[:300]}"
+                    print(f"[视频分析] upload={upload_id} 解析结果无效: {last_error[:200]}")
             else:
-                # Pipeline 失败，记录错误，进入重试
-                last_error = f"Pipeline exit code {proc.returncode}: {stderr_text[:500]}"
+                # 解析器失败，记录错误，进入重试
+                last_error = f"解析器退出码 {proc.returncode}: {stderr_text[:500]}"
                 print(f"[视频分析] upload={upload_id} 第{attempt}次失败: {last_error[:200]}")
         except asyncio.TimeoutError:
             last_error = "视频分析超时（180秒）"
@@ -1137,6 +1178,30 @@ async def analyze_upload_video(upload_id: str, file_path: str, product_name: str
     db_exec(
         "UPDATE collect_uploads SET status='failed', error_message=?, analyzed_at=? WHERE id=?",
         (last_error[:500], time.time(), upload_id)
+    )
+
+
+async def _write_price_data(upload_id: str, product_name: str, parsed: dict):
+    """将视频解析结果写入 price_data（核心闭环 V1-6）"""
+    upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
+    if not upload:
+        return
+    task = db_query("SELECT * FROM collect_tasks WHERE id=?", (upload["task_id"],), fetch="one")
+    store_id = task["store_id"] if task else None
+    competitor = (task or {}).get("competitor_store_name")
+    # 先删后插，保证每个 upload 仅一条 price_data
+    db_exec("DELETE FROM price_data WHERE upload_id=?", (upload_id,))
+    db_exec(
+        """INSERT INTO price_data
+           (id, task_id, upload_id, store_id, product_name, product_spec, competitor_store,
+            price, has_promotion, promotion_desc, captured_at, source_video, ai_confidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), upload["task_id"], upload_id, store_id,
+         parsed.get("product_name") or product_name or "未识别商品",
+         parsed.get("product_spec"), competitor,
+         parsed.get("detected_price"), parsed.get("has_promotion", 0),
+         parsed.get("promotion_desc"), time.time(), upload.get("file_path"),
+         parsed.get("confidence", 0))
     )
 
 
@@ -1181,25 +1246,58 @@ async def get_upload_review(upload_id: str, user: dict = Depends(require_role("m
     }
 
 
+def _upsert_price_data(upload_id, *, product_name=None, product_spec=None, price=None,
+                       has_promotion=None, promotion_desc=None, confidence=1.0):
+    """[F2修复] confirm时若price_data无该upload记录则INSERT，否则UPDATE。
+    保证人工复核（即使AI解析失败）也能形成价格数据闭环。"""
+    existing = db_query("SELECT id FROM price_data WHERE upload_id=?", (upload_id,), fetch="one")
+    if existing:
+        db_exec("""UPDATE price_data SET
+                      product_name=COALESCE(?, product_name),
+                      product_spec=COALESCE(?, product_spec),
+                      price=COALESCE(?, price),
+                      has_promotion=COALESCE(?, has_promotion),
+                      promotion_desc=COALESCE(?, promotion_desc),
+                      ai_confidence=?
+                   WHERE upload_id=?""",
+                 (product_name, product_spec, price, has_promotion, promotion_desc, confidence, upload_id))
+        return
+    upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
+    if not upload:
+        return
+    task = db_query("SELECT * FROM collect_tasks WHERE id=?", (upload["task_id"],), fetch="one")
+    store_id = task["store_id"] if task else None
+    competitor = (task or {}).get("competitor_store_name")
+    db_exec("""INSERT INTO price_data
+        (id, task_id, upload_id, store_id, product_name, product_spec, competitor_store,
+         price, has_promotion, promotion_desc, captured_at, source_video, ai_confidence)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), upload["task_id"], upload_id, store_id,
+         product_name or "未命名商品", product_spec, competitor, price,
+         has_promotion or 0, promotion_desc, time.time(), upload.get("file_path"), confidence))
+
+
 @app.post("/api/uploads/{upload_id}/confirm")
 async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(require_role("manager"))):
-    """确认/人工修正视频解析结果（manager/admin）"""
+    """确认/人工修正视频解析结果（manager/admin）。[F2修复] 确保回写 price_data。"""
     upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
     if not upload:
         raise HTTPException(status_code=404, detail="上传记录不存在")
-    # req: {correction: {product_name, product_spec, captured_price, notes}, confirm: bool}
     confirm = req.get("confirm", True)
     correction = req.get("correction", {})
+    existing_parsed = None
+    if upload.get("result_json"):
+        try:
+            existing_parsed = json.loads(upload["result_json"])
+        except Exception:
+            existing_parsed = None
     if not correction and confirm:
-        # 仅确认，不修改
-        db_exec(
-            "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
-            (upload.get("result_json"), time.time(), upload_id)
-        )
-        log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
-                  details={"method": "ai_result_accepted"})
-        return {"ok": True, "message": "已确认（接受AI结果）", "upload_id": upload_id}
-    # 人工修正 - 存储修正后的结果
+        pn = (existing_parsed or {}).get("product_name") if existing_parsed else None
+        pp = (existing_parsed or {}).get("detected_price") if existing_parsed else None
+        _upsert_price_data(upload_id, product_name=pn, price=pp, confidence=1.0)
+        db_exec("UPDATE collect_uploads SET status='confirmed', analyzed_at=? WHERE id=?", (time.time(), upload_id))
+        log_audit(user, "confirm", resource_type="upload", resource_id=upload_id, details={"method": "accepted"})
+        return {"ok": True, "message": "已确认（价格数据已写入）", "upload_id": upload_id}
     corrected = {
         "method": "human_corrected",
         "corrected_by": user.get("username"),
@@ -1211,9 +1309,17 @@ async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(
         "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
         (json.dumps(corrected, ensure_ascii=False), time.time(), upload_id)
     )
+    cname = correction.get("product_name") or None
+    cspec = correction.get("product_spec") or None
+    cprice_raw = correction.get("captured_price")
+    try:
+        cprice = float(cprice_raw) if cprice_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        cprice = None
+    _upsert_price_data(upload_id, product_name=cname, product_spec=cspec, price=cprice, confidence=1.0)
     log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
               details={"method": "human_corrected", "correction": correction})
-    return {"ok": True, "message": "已保存人工修正", "upload_id": upload_id}
+    return {"ok": True, "message": "已保存人工修正（价格数据已写入）", "upload_id": upload_id}
 
 
 @app.get("/api/uploads/pending")
@@ -1541,6 +1647,79 @@ async def audit_stats(user: dict = Depends(require_role("admin"))):
         (time.time() - 86400 * 7,), fetch="all"
     )
     return {"stats_7d": rows}
+
+
+# ===== D2-01 AI 主动巡检引擎 =====
+def run_inspection():
+    """扫描 price_data 检测价格异常，生成消息入 message_queue。
+    当前覆盖：同商品跨店/跨竞品价格异常（高于均价30%）。
+    库存临期/滞销检测预留（待库存数据源接入）。"""
+    rows = db_query("SELECT * FROM price_data WHERE price IS NOT NULL ORDER BY product_name, product_spec", fetch="all")
+    if not rows:
+        return {"scanned": 0, "alerts": 0, "note": "price_data 为空"}
+    groups = {}
+    for r in rows:
+        key = (r["product_name"], r["product_spec"] or "")
+        groups.setdefault(key, []).append(r)
+    alerts = 0
+    for (pname, pspec), items in groups.items():
+        prices = [it["price"] for it in items if it["price"] is not None]
+        if len(prices) < 2:
+            continue
+        avg = sum(prices) / len(prices)
+        for it in items:
+            if it["price"] is None:
+                continue
+            if it["price"] > avg * 1.3:
+                store_id = it["store_id"]
+                title = f"价格异常：{pname}{(' ' + pspec) if pspec else ''} 高于同类均价30%"
+                body = (f"本店价 ¥{it['price']:.2f}，同类均价 ¥{avg:.2f}"
+                        f"（竞品：{it.get('competitor_store') or '未知'}）。建议核查定价策略。")
+                dup = db_query(
+                    "SELECT id FROM message_queue WHERE store_id=? AND title=? AND is_read=0 AND related_type='price_anomaly' LIMIT 1",
+                    (store_id, title), fetch="one")
+                if not dup:
+                    db_exec(
+                        """INSERT INTO message_queue (id, store_id, level, title, body, related_type, related_id, created_at)
+                           VALUES (?, ?, 'warning', ?, ?, 'price_anomaly', ?, ?)""",
+                        (str(uuid.uuid4()), store_id, title, body, it["id"], time.time()))
+                    alerts += 1
+    return {"scanned": len(rows), "alerts": alerts}
+
+
+async def scheduler_loop():
+    """每小时运行一次巡检（启动后30秒首跑）"""
+    await asyncio.sleep(30)
+    while True:
+        try:
+            run_inspection()
+        except Exception as e:
+            print(f"[巡检调度] 异常: {e}")
+        await asyncio.sleep(3600)
+
+
+@app.post("/api/inspection/run")
+async def trigger_inspection(user: dict = Depends(require_role("manager"))):
+    """手动触发巡检（manager/admin）"""
+    res = run_inspection()
+    log_audit(user, "inspection_run", details=res)
+    return {"ok": True, "result": res}
+
+
+@app.get("/api/messages")
+async def get_messages(user: dict = Depends(require_auth)):
+    """消息中心：store_owner 仅本店，manager/admin 看全部"""
+    if user["role"] in ("admin", "manager"):
+        rows = db_query("SELECT * FROM message_queue ORDER BY created_at DESC LIMIT 100", fetch="all")
+    else:
+        rows = db_query("SELECT * FROM message_queue WHERE store_id=? ORDER BY created_at DESC LIMIT 100",
+                        (user.get("store_id"),), fetch="all")
+    return {"messages": rows, "count": len(rows)}
+
+
+@app.on_event("startup")
+async def _startup_scheduler():
+    asyncio.create_task(scheduler_loop())
 
 
 # ===== Main =====
