@@ -417,6 +417,29 @@ body {
 }
 .modal-btn:hover { opacity: 0.85; }
 
+/* ===== Messages (D2-02) ===== */
+.msg-badge { background:#e74c3c; color:#fff; border-radius:10px; font-size:11px; padding:1px 6px; margin-left:4px; }
+.messages-list { display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; }
+.msg-item { border:1px solid var(--border,#e5e7eb); border-radius:8px; padding:12px 14px; cursor:pointer; transition:background 0.15s; }
+.msg-item:hover { background:rgba(0,0,0,0.02); }
+.msg-item.unread { border-left:3px solid var(--accent,#4f8cff); }
+.msg-item.read { opacity:0.55; }
+.msg-item.lvl-urgent { border-left-color:#e74c3c; }
+.msg-item.lvl-warning { border-left-color:#f39c12; }
+.msg-item.lvl-info { border-left-color:#3498db; }
+.msg-title { font-weight:600; font-size:14px; margin-bottom:6px; display:flex; align-items:center; gap:4px; }
+.msg-body { font-size:13px; color:var(--text-dim,#888); line-height:1.5; }
+.msg-time { font-size:11px; color:var(--text-faint,#aaa); margin-top:6px; }
+.msg-empty { text-align:center; color:var(--text-faint,#aaa); padding:24px; }
+.msg-level-tag { display:inline-block; font-size:10px; padding:1px 6px; border-radius:4px; font-weight:500; }
+.msg-level-tag.urgent { background:#fdecea; color:#e74c3c; }
+.msg-level-tag.warning { background:#fef5e7; color:#f39c12; }
+.msg-level-tag.info { background:#eaf2fa; color:#3498db; }
+.msg-filter-bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+.msg-filter-btn { font-size:12px; padding:4px 12px; border-radius:6px; border:1px solid var(--border,#e5e7eb); background:#fff; cursor:pointer; }
+.msg-filter-btn.active { background:var(--accent,#4f8cff); color:#fff; border-color:var(--accent,#4f8cff); }
+.msg-top-actions { display:flex; gap:8px; margin-bottom:12px; }
+
 /* ===== Welcome ===== */
 .welcome-screen {
   flex: 1;
@@ -556,6 +579,7 @@ body {
     <button class="topbar-btn" id="btnPrice" onclick="openPriceMatrix()" style="display:none;">💰 比价矩阵</button>
     <button class="topbar-btn" id="btnSettings" onclick="openConfig()" style="display:none;">⚙️ 设置</button>
     <button class="topbar-btn" id="btnUsers" onclick="openUserMgmt()" style="display:none;">👥 用户</button>
+    <button class="topbar-btn" id="btnMessages" onclick="openMessages()" style="display:none;">🔔 消息<span id="msgBadge" class="msg-badge" style="display:none;"></span></button>
     <button class="topbar-btn" onclick="logout()">🚪 登出</button>
   </div>
 </div>
@@ -861,6 +885,29 @@ body {
   </div>
 </div>
 
+<!-- ===== Messages Modal (D2-02) ===== -->
+<div class="modal-overlay" id="messagesModal">
+  <div class="modal" style="width:620px;max-height:85vh;overflow-y:auto;">
+    <h2>📬 消息中心</h2>
+    <div class="msg-filter-bar">
+      <button class="msg-filter-btn active" data-filter="all" onclick="filterMessages('all')">全部</button>
+      <button class="msg-filter-btn" data-filter="urgent" onclick="filterMessages('urgent')">紧急</button>
+      <button class="msg-filter-btn" data-filter="warning" onclick="filterMessages('warning')">警告</button>
+      <button class="msg-filter-btn" data-filter="info" onclick="filterMessages('info')">提醒</button>
+      <button class="msg-filter-btn" data-filter="unread" onclick="filterMessages('unread')">未读</button>
+    </div>
+    <div class="msg-top-actions">
+      <button class="modal-btn" onclick="markAllRead()">✓ 全部已读</button>
+      <button class="modal-btn primary" onclick="triggerInspection()" id="btnInspection" style="display:none;">🔍 立即巡检</button>
+    </div>
+    <div id="messagesList" class="messages-list"></div>
+    <div class="modal-actions" style="margin-top:12px;">
+      <button class="modal-btn" onclick="closeMessages()">关闭</button>
+      <button class="modal-btn primary" onclick="loadMessages()">🔄 刷新</button>
+    </div>
+  </div>
+</div>
+
 <!-- 比价矩阵模态框 (D3-2) -->
 <div class="modal-overlay" id="priceMatrixModal">
   <div class="modal" style="width:820px;max-height:88vh;overflow-y:auto;">
@@ -983,6 +1030,7 @@ async function doRegister() {
 }
 
 async function logout() {
+  stopMsgPolling();
   try { await api('/api/auth/logout', { method: 'POST' }); } catch (e) {}
   token = '';
   localStorage.removeItem('lxc_token');
@@ -1018,6 +1066,8 @@ async function afterLogin() {
   await loadHistory();
   // Load data assets from API
   await loadDataAssets();
+  // D2-02: start unread message polling
+  startMsgPolling();
 }
 
 // ===== RBAC Dynamic UI Rendering =====
@@ -1032,16 +1082,19 @@ function renderRoleBasedUI(role, stores) {
     document.getElementById('btnSettings').style.display = '';
     document.getElementById('btnUsers').style.display = '';
     document.getElementById('btnPrice').style.display = '';
+    document.getElementById('btnMessages').style.display = '';
   } else if (isManager) {
     document.getElementById('btnTasks').style.display = '';
     document.getElementById('btnSettings').style.display = '';
     document.getElementById('btnUsers').style.display = 'none';
     document.getElementById('btnPrice').style.display = '';
+    document.getElementById('btnMessages').style.display = '';
   } else {
     document.getElementById('btnTasks').style.display = '';
     document.getElementById('btnSettings').style.display = 'none';
     document.getElementById('btnUsers').style.display = 'none';
     document.getElementById('btnPrice').style.display = 'none';
+    document.getElementById('btnMessages').style.display = '';
   }
 
   // === Region 2: Store Selector ===
@@ -1666,6 +1719,126 @@ function openPriceMatrix() {
   });
 }
 function closePriceMatrix() { document.getElementById('priceMatrixModal').classList.remove('show'); }
+
+// ===== Messages (D2-02) =====
+function escapeHtml(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+let _msgFilter = 'all';
+let _allMsgs = [];
+let _pollTimer = null;
+
+async function openMessages() {
+  const role = currentUser ? currentUser.role : '';
+  document.getElementById('btnInspection').style.display = (role === 'admin' || role === 'manager') ? '' : 'none';
+  document.getElementById('messagesModal').classList.add('show');
+  await loadMessages();
+}
+function closeMessages() { document.getElementById('messagesModal').classList.remove('show'); }
+
+function filterMessages(f) {
+  _msgFilter = f;
+  document.querySelectorAll('.msg-filter-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.filter === f);
+  });
+  renderMessages();
+}
+
+async function loadMessages() {
+  const list = document.getElementById('messagesList');
+  list.innerHTML = '<div class="msg-empty">加载中...</div>';
+  try {
+    const resp = await api('/api/messages');
+    const data = await resp.json();
+    _allMsgs = data.messages || [];
+    renderMessages();
+    updateMsgBadge();
+  } catch (e) {
+    list.innerHTML = '<div class="msg-empty">加载失败：' + e.message + '</div>';
+  }
+}
+
+function renderMessages() {
+  const list = document.getElementById('messagesList');
+  let msgs = _allMsgs;
+  if (_msgFilter === 'unread') {
+    msgs = msgs.filter(m => !m.is_read);
+  } else if (_msgFilter !== 'all') {
+    msgs = msgs.filter(m => (m.level || 'info') === _msgFilter);
+  }
+  if (msgs.length === 0) {
+    list.innerHTML = '<div class="msg-empty">' + (_msgFilter === 'all' ? '暂无消息' : '该分类暂无消息') + '</div>';
+    return;
+  }
+  const levelLabels = { urgent: '紧急', warning: '警告', info: '提醒' };
+  list.innerHTML = msgs.map(m => {
+    const lvl = (m.level || 'info');
+    const time = new Date((m.created_at || 0) * 1000).toLocaleString('zh-CN');
+    const readClass = m.is_read ? ' read' : ' unread';
+    const tag = '<span class="msg-level-tag ' + lvl + '">' + (levelLabels[lvl] || lvl) + '</span>';
+    return '<div class="msg-item lvl-' + lvl + readClass + '" onclick="markMessageRead(\'' + m.id + '\')">' +
+      '<div class="msg-title">' + tag + escapeHtml(m.title) + '</div>' +
+      '<div class="msg-body">' + escapeHtml(m.body) + '</div>' +
+      '<div class="msg-time">' + time + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+async function markMessageRead(msgId) {
+  try {
+    await api('/api/messages/' + msgId + '/read', { method: 'PUT' });
+    const m = _allMsgs.find(x => x.id === msgId);
+    if (m) m.is_read = 1;
+    renderMessages();
+    updateMsgBadge();
+  } catch (e) { console.error('标记已读失败:', e); }
+}
+
+async function markAllRead() {
+  try {
+    await api('/api/messages/read-all', { method: 'PUT' });
+    _allMsgs.forEach(m => m.is_read = 1);
+    renderMessages();
+    updateMsgBadge();
+  } catch (e) { console.error('全部已读失败:', e); }
+}
+
+async function triggerInspection() {
+  try {
+    const resp = await api('/api/inspection/run', { method: 'POST' });
+    const data = await resp.json();
+    alert('巡检完成：扫描 ' + (data.result && data.result.scanned || 0) + ' 条价格数据，发现 ' + (data.result && data.result.alerts || 0) + ' 条异常');
+    await loadMessages();
+  } catch (e) { alert('巡检失败：' + e.message); }
+}
+
+function updateMsgBadge() {
+  const unreadCount = _allMsgs.filter(m => !m.is_read).length;
+  const badge = document.getElementById('msgBadge');
+  if (unreadCount > 0) { badge.textContent = unreadCount; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
+async function pollUnreadCount() {
+  if (!currentUser) return;
+  try {
+    const resp = await api('/api/messages/unread-count');
+    const data = await resp.json();
+    const badge = document.getElementById('msgBadge');
+    if (data.unread > 0) { badge.textContent = data.unread; badge.style.display = ''; }
+    else { badge.style.display = 'none'; }
+  } catch (e) { /* silent */ }
+}
+
+function startMsgPolling() {
+  if (_pollTimer) clearInterval(_pollTimer);
+  pollUnreadCount();
+  _pollTimer = setInterval(pollUnreadCount, 60000);
+}
+function stopMsgPolling() {
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+}
 
 async function doUpload() {
   const fileInput = document.getElementById('uploadFileInput');

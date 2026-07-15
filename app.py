@@ -1681,9 +1681,12 @@ def run_inspection():
         for it in items:
             if it["price"] is None:
                 continue
-            if it["price"] > avg * 1.3:
+            ratio = it["price"] / avg if avg > 0 else 1
+            if ratio > 1.3:
                 store_id = it["store_id"]
-                title = f"价格异常：{pname}{(' ' + pspec) if pspec else ''} 高于同类均价30%"
+                level = "urgent" if ratio > 1.5 else "warning"
+                pct = int((ratio - 1) * 100)
+                title = f"价格异常：{pname}{(' ' + pspec) if pspec else ''} 高于同类均价{pct}%"
                 body = (f"本店价 ¥{it['price']:.2f}，同类均价 ¥{avg:.2f}"
                         f"（竞品：{it.get('competitor_store') or '未知'}）。建议核查定价策略。")
                 dup = db_query(
@@ -1692,8 +1695,8 @@ def run_inspection():
                 if not dup:
                     db_exec(
                         """INSERT INTO message_queue (id, store_id, level, title, body, related_type, related_id, created_at)
-                           VALUES (?, ?, 'warning', ?, ?, 'price_anomaly', ?, ?)""",
-                        (str(uuid.uuid4()), store_id, title, body, it["id"], time.time()))
+                           VALUES (?, ?, ?, ?, ?, 'price_anomaly', ?, ?)""",
+                        (str(uuid.uuid4()), store_id, level, title, body, it["id"], time.time()))
                     alerts += 1
     return {"scanned": len(rows), "alerts": alerts}
 
@@ -1723,9 +1726,63 @@ async def get_messages(user: dict = Depends(require_auth)):
     if user["role"] in ("admin", "manager"):
         rows = db_query("SELECT * FROM message_queue ORDER BY created_at DESC LIMIT 100", fetch="all")
     else:
-        rows = db_query("SELECT * FROM message_queue WHERE store_id=? ORDER BY created_at DESC LIMIT 100",
-                        (user.get("store_id"),), fetch="all")
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        store_ids = [s["id"] for s in user_stores]
+        if not store_ids:
+            return {"messages": [], "count": 0}
+        placeholders = ",".join(["?"] * len(store_ids))
+        rows = db_query(
+            f"SELECT * FROM message_queue WHERE store_id IN ({placeholders}) ORDER BY created_at DESC LIMIT 100",
+            store_ids, fetch="all")
     return {"messages": rows, "count": len(rows)}
+
+
+@app.put("/api/messages/{msg_id}/read")
+async def mark_message_read(msg_id: str, user: dict = Depends(require_auth)):
+    """标记单条消息已读（store_owner 仅本店消息）"""
+    msg = db_query("SELECT * FROM message_queue WHERE id=?", (msg_id,), fetch="one")
+    if not msg:
+        raise HTTPException(status_code=404, detail="消息不存在")
+    if user["role"] == "store_owner":
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        store_ids = [s["id"] for s in user_stores]
+        if msg.get("store_id") not in store_ids:
+            raise HTTPException(status_code=403, detail="无权操作")
+    db_exec("UPDATE message_queue SET is_read=1 WHERE id=?", (msg_id,))
+    return {"ok": True}
+
+
+@app.put("/api/messages/read-all")
+async def mark_all_read(user: dict = Depends(require_auth)):
+    """全部标记已读"""
+    if user["role"] in ("admin", "manager"):
+        db_exec("UPDATE message_queue SET is_read=1 WHERE is_read=0")
+    else:
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        store_ids = [s["id"] for s in user_stores]
+        if store_ids:
+            placeholders = ",".join(["?"] * len(store_ids))
+            db_exec(
+                f"UPDATE message_queue SET is_read=1 WHERE is_read=0 AND store_id IN ({placeholders})",
+                store_ids)
+    return {"ok": True}
+
+
+@app.get("/api/messages/unread-count")
+async def get_unread_count(user: dict = Depends(require_auth)):
+    """获取未读消息数（轻量级轮询用）"""
+    if user["role"] in ("admin", "manager"):
+        row = db_query("SELECT COUNT(*) as cnt FROM message_queue WHERE is_read=0", fetch="one")
+    else:
+        user_stores = get_user_stores(DB_PATH, user["user_id"])
+        store_ids = [s["id"] for s in user_stores]
+        if not store_ids:
+            return {"unread": 0}
+        placeholders = ",".join(["?"] * len(store_ids))
+        row = db_query(
+            f"SELECT COUNT(*) as cnt FROM message_queue WHERE is_read=0 AND store_id IN ({placeholders})",
+            store_ids, fetch="one")
+    return {"unread": row["cnt"] if row else 0}
 
 
 @app.on_event("startup")
