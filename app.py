@@ -11,6 +11,7 @@ import time
 import uuid
 import asyncio
 import httpx
+from datetime import datetime
 from pathlib import Path
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -187,11 +188,15 @@ def init_db():
         retry_count INTEGER DEFAULT 0,
         uploaded_at REAL,
         analyzed_at REAL,
+        file_md5 TEXT,
         FOREIGN KEY (task_id) REFERENCES collect_tasks(id),
         FOREIGN KEY (uploaded_by) REFERENCES users(id)
     )""")
-
-    # 比价结果
+    # 尝试追加 file_md5 列（表可能已存在旧版本）
+    try:
+        c.execute("ALTER TABLE collect_uploads ADD COLUMN file_md5 TEXT")
+    except Exception:
+        pass  # 列已存在
     c.execute("""CREATE TABLE IF NOT EXISTS price_data (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -950,10 +955,11 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @app.post("/api/tasks/{task_id}/upload")
 async def upload_video(task_id: str, request: Request, user: dict = Depends(require_auth)):
-    """上传采集视频
+    """上传采集视频 [D2-1 D2-2]
     - Content-Type: multipart/form-data
-    - 字段名: video_file
-    - 可附带字段: task_item_id, note
+    - 字段名: video_file, task_item_id (可选), file_md5 (可选，客户端预计算)
+    - 支持格式: MP4/MOV/AVI/MKV/WEBM，≤200MB
+    - 含截止日期校验 + MD5去重拦截
     """
     # 验证任务存在
     task = db_query("SELECT * FROM collect_tasks WHERE id=?", (task_id,), fetch="one")
@@ -967,6 +973,12 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
         if not any(s["id"] == task["store_id"] for s in user_stores):
             raise HTTPException(status_code=403, detail="无权上传到该任务")
 
+    # D2-2: 截止日期校验
+    if task.get("deadline"):
+        dl = float(task["deadline"])
+        if time.time() > dl:
+            raise HTTPException(status_code=400, detail="该任务已过截止日期，无法上传")
+
     try:
         form = await request.form()
     except Exception:
@@ -976,13 +988,34 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
     if not video_file:
         raise HTTPException(status_code=400, detail="缺少 video_file 字段")
 
+    task_item_id = form.get("task_item_id", None)
+    file_md5 = form.get("file_md5", None)  # 客户端预计算MD5
+
     # 读取文件内容
     content = await video_file.read()
     size = len(content)
 
-    # 文件大小限制：50MB
-    if size > 50 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="视频文件不能超过50MB")
+    # D2-1: 文件大小限制：200MB
+    if size > 200 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="视频文件不能超过200MB")
+    if size < 1024:
+        raise HTTPException(status_code=400, detail="文件太小，可能是空文件")
+
+    # D2-2: MD5去重拦截 — 同任务+同明细项+同MD5 → 拒绝
+    if file_md5:
+        dup_sql = "SELECT id, filename, uploaded_at FROM collect_uploads WHERE task_id=? AND file_md5=? AND status NOT IN ('failed')"
+        dup_params = [task_id, file_md5]
+        if task_item_id:
+            dup_sql += " AND task_item_id=?"
+            dup_params.append(str(task_item_id))
+        dup_sql += " LIMIT 1"
+        dup = db_query(dup_sql, dup_params, fetch="one")
+        if dup:
+            dup_time = datetime.fromtimestamp(dup["uploaded_at"]).strftime("%m-%d %H:%M")
+            raise HTTPException(
+                status_code=409,
+                detail=f"检测到相同视频（{dup['filename']}，{dup_time}已上传），请勿重复上传同一视频"
+            )
 
     # 保存到 uploads 目录
     file_ext = os.path.splitext(video_file.filename or "video.mp4")[1] or ".mp4"
@@ -994,14 +1027,13 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
     # 写入数据库
     upload_id = str(uuid.uuid4())
     now = time.time()
-    task_item_id = form.get("task_item_id", None)
 
     db_exec(
         """INSERT INTO collect_uploads
-           (id, task_id, task_item_id, uploaded_by, filename, file_path, file_size, status, uploaded_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'analyzing', ?)""",
+           (id, task_id, task_item_id, uploaded_by, filename, file_path, file_size, status, uploaded_at, file_md5)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'analyzing', ?, ?)""",
         (upload_id, task_id, str(task_item_id) if task_item_id else None,
-         user["user_id"], video_file.filename or safe_name, str(file_path), size, now)
+         user["user_id"], video_file.filename or safe_name, str(file_path), size, now, file_md5)
     )
 
     # 如果有 task_item_id，标记该明细为已提交
@@ -1012,10 +1044,11 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
     db_exec("UPDATE collect_tasks SET status='in_progress', updated_at=? WHERE id=?", (now, task_id))
 
     # 异步触发 AI 视频分析
-    asyncio.create_task(analyze_upload_video(upload_id, str(file_path), upload["product_name"] if (upload := db_query(
-        "SELECT ti.product_name FROM collect_uploads u LEFT JOIN collect_task_items ti ON u.task_item_id=ti.id WHERE u.id=?",
-        (upload_id,), fetch="one"
-    )) else None))
+    product_name = db_query(
+        "SELECT ti.product_name FROM collect_task_items ti WHERE ti.id=?",
+        (str(task_item_id),), fetch="one"
+    )
+    asyncio.create_task(analyze_upload_video(upload_id, str(file_path), product_name["product_name"] if product_name else None))
 
     return {
         "ok": True,
@@ -1025,6 +1058,26 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
         "status": "analyzing",
         "message": "上传成功，AI分析已自动启动"
     }
+
+
+@app.get("/api/tasks/{task_id}/check-md5")
+async def check_upload_md5(task_id: str, md5: str, task_item_id: str = None, user: dict = Depends(require_auth)):
+    """[D2-1] 前端预上传MD5查重接口
+    - 前端选好文件后，先计算MD5，调用此接口查询是否已存在
+    - 返回 {duplicate: true/false, existing_upload: {...}}
+    """
+    task = db_query("SELECT * FROM collect_tasks WHERE id=?", (task_id,), fetch="one")
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    sql = "SELECT id, task_item_id, filename, file_size, uploaded_at, status FROM collect_uploads WHERE task_id=? AND file_md5=? AND status NOT IN ('failed')"
+    params = [task_id, md5]
+    if task_item_id:
+        sql += " AND task_item_id=?"
+        params.append(task_item_id)
+    sql += " LIMIT 1"
+    dup = db_query(sql, params, fetch="one")
+    return {"duplicate": dup is not None, "existing_upload": dup}
 
 
 # ===== AI 视频分析异步任务 =====

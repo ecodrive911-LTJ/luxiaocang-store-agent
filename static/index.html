@@ -824,7 +824,7 @@ body {
       <div id="taskUploadsList" style="font-size:12px;"></div>
     </div>
     <div style="margin-top:12px;">
-      <label style="font-size:12px;color:var(--text-dim);">上传录屏视频 (≤50MB)</label>
+      <label style="font-size:12px;color:var(--text-dim);">上传录屏视频 (≤200MB，支持MP4/MOV/AVI)</label>
       <input type="file" id="uploadFileInput" accept="video/*" style="display:block;margin-top:4px;">
       <button class="modal-btn primary" onclick="doUpload()" style="margin-top:8px;">📤 上传视频</button>
       <span id="uploadStatus" style="font-size:12px;color:var(--text-dim);margin-left:8px;"></span>
@@ -1667,20 +1667,19 @@ async function doUpload() {
   const file = fileInput.files[0];
   const statusEl = document.getElementById('uploadStatus');
   if (!file) { statusEl.textContent = '⚠️ 请选择视频文件'; statusEl.style.color = 'var(--warn)'; return; }
-  // 校验文件类型
-  const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/avi'];
+  // D2-1: 文件类型校验
   const allowedExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv'];
   const ext = '.' + file.name.split('.').pop().toLowerCase();
-  if (!allowedExts.includes(ext) && !allowedTypes.includes(file.type)) {
+  if (!allowedExts.includes(ext)) {
     statusEl.textContent = `⚠️ 不支持的文件格式（${ext}），请上传MP4/MOV/AVI视频`;
     statusEl.style.color = 'var(--warn)';
     return;
   }
-  // 校验文件大小
-  if (file.size > 50*1024*1024) { statusEl.textContent = '⚠️ 文件超过50MB限制'; statusEl.style.color = 'var(--warn)'; return; }
+  // D2-1: 文件大小校验（200MB上限）
+  if (file.size > 200*1024*1024) { statusEl.textContent = '⚠️ 文件超过200MB限制，请压缩后再上传'; statusEl.style.color = 'var(--warn)'; return; }
   if (file.size < 1024) { statusEl.textContent = '⚠️ 文件太小，可能是空文件'; statusEl.style.color = 'var(--warn)'; return; }
-  // 校验时长（通过MediaElement）
-  statusEl.textContent = '⏳ 校验视频...';
+  // D2-1: 时长预检（上限5分钟）
+  statusEl.textContent = '⏳ 校验视频格式与时长...';
   statusEl.style.color = 'var(--accent)';
   try {
     const duration = await checkVideoDuration(file);
@@ -1694,14 +1693,41 @@ async function doUpload() {
       statusEl.style.color = 'var(--warn)';
       return;
     }
+  } catch (e) { /* 浏览器不支持读取时长，跳过 */ }
+
+  // D2-1: 计算文件MD5
+  statusEl.textContent = '🔐 计算文件指纹...';
+  statusEl.style.color = 'var(--accent)';
+  let fileMd5 = null;
+  try {
+    fileMd5 = await computeFileMd5(file);
   } catch (e) {
-    // 浏览器不支持读取时长，跳过此校验
+    statusEl.textContent = '⚠️ 无法计算文件指纹（浏览器不支持），将跳过去重检查';
+    statusEl.style.color = 'var(--warn)';
   }
-  // 开始上传
+
+  // D2-1: MD5预查重
+  if (fileMd5) {
+    try {
+      const r = await api(`/api/tasks/${currentTaskId}/check-md5?md5=${encodeURIComponent(fileMd5)}`);
+      const dupData = await r.json();
+      if (dupData.duplicate) {
+        const dup = dupData.existing_upload;
+        const dupTime = new Date(dup.uploaded_at * 1000).toLocaleString('zh-CN');
+        if (!confirm(`检测到相同视频已上传（${dup.filename}，${dupTime}）。\n\n确认要再次上传吗？`)) {
+          statusEl.textContent = '已取消上传';
+          return;
+        }
+      }
+    } catch (e) { /* 查重接口不可用，跳过 */ }
+  }
+
+  // 上传
   statusEl.textContent = '📤 上传中 0%...';
   statusEl.style.color = 'var(--accent)';
   const formData = new FormData();
   formData.append('video_file', file);
+  if (fileMd5) formData.append('file_md5', fileMd5);
   try {
     const xhr = new XMLHttpRequest();
     xhr.upload.onprogress = function(e) {
@@ -1735,15 +1761,15 @@ async function doUpload() {
       };
       xhr.send(formData);
     });
-    // Poll for analysis result
+    // D2-4: 轮询解析状态
     statusEl.textContent = '✅ 上传成功！🔬 AI解析中...';
     statusEl.style.color = 'var(--accent)';
     let pollCount = 0;
     const pollInterval = setInterval(async () => {
       pollCount++;
-      if (pollCount > 60) { clearInterval(pollInterval); statusEl.textContent = '⏰ 解析超时，请手动刷新'; return; }
+      if (pollCount > 60) { clearInterval(pollInterval); statusEl.textContent = '⏰ 解析超时，请手动刷新任务详情'; return; }
       try {
-        const r = await api('/api/tasks/' + currentTaskId + '/uploads');
+        const r = await api('/api/tasks/' + currentTaskId);
         const d = await r.json();
         const last = d.uploads && d.uploads[0];
         if (last) {
@@ -1754,8 +1780,10 @@ async function doUpload() {
             openTaskDetail(currentTaskId);
           } else if (last.status === 'failed') {
             clearInterval(pollInterval);
-            statusEl.textContent = '❌ 解析失败：' + (last.error_msg || '未知错误') + ' 请重新上传';
+            statusEl.textContent = '❌ 解析失败：' + (last.error_message || '未知错误') + '。可直接重新选择视频上传';
             statusEl.style.color = 'var(--danger)';
+          } else if (last.status === 'retrying') {
+            statusEl.textContent = `🔁 解析失败，自动重试中 (${pollCount*5}s)...`;
           } else if (last.status === 'analyzing') {
             statusEl.textContent = `✅ 上传成功！🔬 AI解析中 (${pollCount*5}s)...`;
           }
@@ -1763,8 +1791,17 @@ async function doUpload() {
       } catch (e) {}
     }, 5000);
   } catch (e) {
-    // 已在上方处理
+    // 上传失败已在上方处理
   }
+}
+
+// D2-1: 计算文件MD5（使用 Web Crypto API）
+async function computeFileMd5(file) {
+  const buffer = await file.arrayBuffer();
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+  // 用 SHA-256 代替 MD5（浏览器原生支持），后端也存此值作去重用
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 function checkVideoDuration(file) {
