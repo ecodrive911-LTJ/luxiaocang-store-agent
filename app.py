@@ -197,6 +197,11 @@ def init_db():
         c.execute("ALTER TABLE collect_uploads ADD COLUMN file_md5 TEXT")
     except Exception:
         pass  # 列已存在
+    # 尝试追加 retry_count 列（旧表兼容）
+    try:
+        c.execute("ALTER TABLE collect_uploads ADD COLUMN retry_count INTEGER DEFAULT 0")
+    except Exception:
+        pass  # 列已存在
     c.execute("""CREATE TABLE IF NOT EXISTS price_data (
         id TEXT PRIMARY KEY,
         task_id TEXT NOT NULL,
@@ -854,6 +859,8 @@ async def create_task(req: CreateTaskRequest, user: dict = Depends(require_role(
             )
             items_added += 1
 
+    log_audit(user, "create_task", resource_type="task", resource_id=task_id,
+              store_id=req.store_id, details={"title": req.title, "items": items_added})
     return {
         "ok": True,
         "task": {
@@ -1091,32 +1098,51 @@ async def analyze_upload_video(upload_id: str, file_path: str, product_name: str
     while attempt <= MAX_RETRY:
         attempt += 1
         try:
-            # Step 1: 尝试运行 video_pipeline.py 抽帧+OCR
-            pipeline_script = str(SCRIPTS_DIR / "video_pipeline.py")
-            cmd = [sys.executable, pipeline_script, file_path]
+            # Step 1: 调用单视频解析器（抽帧+OCR+价格提取）
+            analyzer_script = str(SCRIPTS_DIR / "analyze_video.py")
+            cmd = [sys.executable, analyzer_script, file_path, product_name or ""]
             proc = await asyncio.create_subprocess_exec(
                 *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
             )
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
-            stdout_text = stdout.decode('utf-8', errors='replace')[-4000:]
+            stdout_text = stdout.decode('utf-8', errors='replace')
             stderr_text = stderr.decode('utf-8', errors='replace')[-1000:]
 
             if proc.returncode == 0:
-                # Pipeline 成功
-                result_json = json.dumps({
-                    "method": "video_pipeline",
-                    "success": True,
-                    "stdout": stdout_text[:3000],
-                    "product_name": product_name,
-                }, ensure_ascii=False)
-                db_exec(
-                    "UPDATE collect_uploads SET status='done', result_json=?, analyzed_at=?, retry_count=? WHERE id=?",
-                    (result_json, time.time(), attempt, upload_id)
-                )
-                return
+                # 解析解析器输出（取最后一段 JSON）
+                parsed = None
+                for line in reversed(stdout_text.strip().splitlines()):
+                    line = line.strip()
+                    if line.startswith("{") and line.endswith("}"):
+                        try:
+                            parsed = json.loads(line)
+                            break
+                        except Exception:
+                            parsed = None
+                if parsed and parsed.get("success"):
+                    # 写入 price_data（核心闭环 V1-6）
+                    await _write_price_data(upload_id, product_name, parsed)
+                    result_json = json.dumps({
+                        "method": "rapidocr",
+                        "success": True,
+                        "product_name": parsed.get("product_name") or product_name,
+                        "detected_price": parsed.get("detected_price"),
+                        "product_spec": parsed.get("product_spec"),
+                        "promotion_desc": parsed.get("promotion_desc"),
+                        "has_promotion": parsed.get("has_promotion", 0),
+                        "confidence": parsed.get("confidence", 0),
+                    }, ensure_ascii=False)
+                    db_exec(
+                        "UPDATE collect_uploads SET status='done', result_json=?, analyzed_at=?, retry_count=? WHERE id=?",
+                        (result_json, time.time(), attempt, upload_id)
+                    )
+                    return
+                else:
+                    last_error = f"解析器未返回有效JSON: {stdout_text[:300]}"
+                    print(f"[视频分析] upload={upload_id} 解析结果无效: {last_error[:200]}")
             else:
-                # Pipeline 失败，记录错误，进入重试
-                last_error = f"Pipeline exit code {proc.returncode}: {stderr_text[:500]}"
+                # 解析器失败，记录错误，进入重试
+                last_error = f"解析器退出码 {proc.returncode}: {stderr_text[:500]}"
                 print(f"[视频分析] upload={upload_id} 第{attempt}次失败: {last_error[:200]}")
         except asyncio.TimeoutError:
             last_error = "视频分析超时（180秒）"
@@ -1137,6 +1163,30 @@ async def analyze_upload_video(upload_id: str, file_path: str, product_name: str
     db_exec(
         "UPDATE collect_uploads SET status='failed', error_message=?, analyzed_at=? WHERE id=?",
         (last_error[:500], time.time(), upload_id)
+    )
+
+
+async def _write_price_data(upload_id: str, product_name: str, parsed: dict):
+    """将视频解析结果写入 price_data（核心闭环 V1-6）"""
+    upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
+    if not upload:
+        return
+    task = db_query("SELECT * FROM collect_tasks WHERE id=?", (upload["task_id"],), fetch="one")
+    store_id = task["store_id"] if task else None
+    competitor = (task or {}).get("competitor_store_name")
+    # 先删后插，保证每个 upload 仅一条 price_data
+    db_exec("DELETE FROM price_data WHERE upload_id=?", (upload_id,))
+    db_exec(
+        """INSERT INTO price_data
+           (id, task_id, upload_id, store_id, product_name, product_spec, competitor_store,
+            price, has_promotion, promotion_desc, captured_at, source_video, ai_confidence)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (str(uuid.uuid4()), upload["task_id"], upload_id, store_id,
+         parsed.get("product_name") or product_name or "未识别商品",
+         parsed.get("product_spec"), competitor,
+         parsed.get("detected_price"), parsed.get("has_promotion", 0),
+         parsed.get("promotion_desc"), time.time(), upload.get("file_path"),
+         parsed.get("confidence", 0))
     )
 
 
@@ -1196,6 +1246,8 @@ async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(
             "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
             (upload.get("result_json"), time.time(), upload_id)
         )
+        # F2: 回写 price_data（标记已复核，置信度=1.0）
+        db_exec("UPDATE price_data SET ai_confidence=1.0 WHERE upload_id=?", (upload_id,))
         log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
                   details={"method": "ai_result_accepted"})
         return {"ok": True, "message": "已确认（接受AI结果）", "upload_id": upload_id}
@@ -1210,6 +1262,23 @@ async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(
     db_exec(
         "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
         (json.dumps(corrected, ensure_ascii=False), time.time(), upload_id)
+    )
+    # F2: 回写 price_data（人工修正后的可信数据）
+    cname = correction.get("product_name") or None
+    cspec = correction.get("product_spec") or None
+    cprice_raw = correction.get("captured_price")
+    try:
+        cprice = float(cprice_raw) if cprice_raw not in (None, "") else None
+    except (TypeError, ValueError):
+        cprice = None
+    db_exec(
+        """UPDATE price_data
+           SET product_name=COALESCE(?, product_name),
+               product_spec=COALESCE(?, product_spec),
+               price=COALESCE(?, price),
+               ai_confidence=1.0
+           WHERE upload_id=?""",
+        (cname, cspec, cprice, upload_id)
     )
     log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
               details={"method": "human_corrected", "correction": correction})

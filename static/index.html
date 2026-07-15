@@ -1062,6 +1062,11 @@ function renderRoleBasedUI(role, stores) {
     sel.style.opacity = '0.7';
     sel.style.cursor = 'not-allowed';
     sel.title = '分店店主不可切换门店';
+  } else {
+    sel.disabled = false;
+    sel.style.opacity = '1';
+    sel.style.cursor = 'pointer';
+    sel.title = '切换门店';
   }
 
   // === Region 3: Sidebar - User Info ===
