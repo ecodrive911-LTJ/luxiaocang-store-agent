@@ -7,13 +7,20 @@ HOST = "120.26.176.215"
 USER = "root"
 PASS = "DOWson1108"
 REMOTE_DIR = "/opt/luxiaocang"
-FILES = ["app.py", "agent_loop.py", "static/index.html"]
+FILES = ["app.py", "agent_loop.py", "analytics.py", "static/index.html"]
+LIB_FILES = ["static/lib/echarts.min.js"]
 
 transport = paramiko.Transport((HOST, 22))
 transport.connect(username=USER, password=PASS)
 sftp = paramiko.SFTPClient.from_transport(transport)
 
-for f in FILES:
+# Ensure static/lib exists for echarts bundle
+try:
+    sftp.stat(f"{REMOTE_DIR}/static/lib")
+except IOError:
+    sftp.mkdir(f"{REMOTE_DIR}/static/lib")
+
+for f in FILES + LIB_FILES:
     local = f"C:\\Users\\13522\\diancanmou\\{f}"
     remote = f"{REMOTE_DIR}/{f}"
     print(f"Uploading {f}...")

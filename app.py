@@ -25,6 +25,7 @@ from product_analysis import (
     basket_analysis as pa_basket,
     full_analysis as pa_full,
 )
+from analytics import compute_store_dashboard, compute_hq_dashboard
 from auth import (
     hash_password, verify_password, create_session, verify_session,
     invalidate_session, get_user_stores, get_store_by_id, extract_token,
@@ -1002,6 +1003,55 @@ async def api_full_analysis(store_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=500, detail=f"分析失败: {e}")
 
 
+# ===== 数据看板接口 (D2-07) =====
+
+@app.get("/api/analytics/store")
+async def api_analytics_store(store_id: str = None, user: dict = Depends(require_auth)):
+    """单店看板数据。
+    store_owner 仅本店；admin/manager 可指定任意店（不传则默认第一店）。
+    """
+    if user["role"] == "store_owner":
+        owned = get_user_stores(DB_PATH, user["user_id"])
+        if not owned:
+            raise HTTPException(status_code=403, detail="无关联门店")
+        store_id = owned[0]["id"]
+    if not store_id:
+        # admin/manager 不传 store_id 时取第一店
+        owned = get_user_stores(DB_PATH, user["user_id"])
+        if not owned:
+            raise HTTPException(status_code=404, detail="无门店数据")
+        store_id = owned[0]["id"]
+    try:
+        result = compute_store_dashboard(DB_PATH, store_id)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"看板生成失败: {e}")
+
+
+@app.get("/api/analytics/headquarters")
+async def api_analytics_hq(user: dict = Depends(require_auth)):
+    """总部看板：所有门店汇总 + 排行（manager/admin 可见全部，store_owner 看本店视角）"""
+    try:
+        result = compute_hq_dashboard(DB_PATH)
+        if "error" in result:
+            raise HTTPException(status_code=404, detail=result["error"])
+        # store_owner 只保留本店数据
+        if user["role"] == "store_owner":
+            owned = get_user_stores(DB_PATH, user["user_id"])
+            my_id = owned[0]["id"] if owned else None
+            result["stores"] = [s for s in result.get("stores", []) if s["store_id"] == my_id]
+            result["store_count"] = len(result["stores"])
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"看板生成失败: {e}")
+
+
 # ===== 任务管理接口 =====
 
 @app.post("/api/tasks")
@@ -1952,6 +2002,10 @@ async def get_unread_count(user: dict = Depends(require_auth)):
 @app.on_event("startup")
 async def _startup_scheduler():
     asyncio.create_task(scheduler_loop())
+
+
+# ===== 静态文件服务 (D2-07: ECharts 等前端资源) =====
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 # ===== Main =====

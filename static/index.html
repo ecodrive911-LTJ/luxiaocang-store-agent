@@ -492,6 +492,32 @@ body {
 .quick-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border: 1px solid var(--border,#e5e7eb); border-radius: 20px; font-size: 13px; color: var(--text-dim,#666); cursor: pointer; transition: all 0.2s; background: var(--bg-card,#fff); }
 .quick-chip:hover { border-color: var(--accent,#4f8cff); color: var(--accent,#4f8cff); background: rgba(79,140,255,0.05); }
 
+/* ===== D2-07 Dashboard ===== */
+.dashboard-view { flex: 1; display: none; flex-direction: column; overflow: hidden; background: var(--bg); }
+.dashboard-view.show { display: flex; }
+.dash-header { display: flex; align-items: center; gap: 14px; padding: 16px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.dash-title { font-size: 18px; font-weight: 700; }
+.dash-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.dash-tabs { display: flex; gap: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.dash-tab { padding: 7px 14px; font-size: 13px; color: var(--text-dim); background: none; border: none; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.dash-tab.active { background: var(--accent); color: #fff; font-weight: 600; }
+.dash-body { flex: 1; overflow-y: auto; padding: 20px 24px 40px; }
+.dash-kpi-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 20px; }
+.kpi-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; }
+.kpi-label { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; }
+.kpi-value { font-size: 24px; font-weight: 700; color: var(--text); }
+.kpi-unit { font-size: 13px; color: var(--text-faint); margin-left: 3px; font-weight: 400; }
+.kpi-sub { font-size: 11px; color: var(--text-faint); margin-top: 6px; }
+.dash-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.chart-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.chart-card.full { grid-column: 1 / -1; }
+.chart-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 6px; }
+.chart-box { width: 100%; height: 300px; }
+.chart-box.tall { height: 340px; }
+.dash-empty { text-align: center; color: var(--text-faint); padding: 60px 20px; font-size: 14px; }
+.dash-back { padding: 6px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font-size: 12px; cursor: pointer; font-family: inherit; }
+.dash-back:hover { border-color: var(--accent); color: var(--accent); }
+
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .chat-messages { padding: 16px; }
@@ -585,6 +611,7 @@ body {
     <button class="topbar-btn" id="btnSettings" onclick="openConfig()" style="display:none;">⚙️ 设置</button>
     <button class="topbar-btn" id="btnUsers" onclick="openUserMgmt()" style="display:none;">👥 用户</button>
     <button class="topbar-btn" id="btnMessages" onclick="openMessages()" style="display:none;">🔔 消息<span id="msgBadge" class="msg-badge" style="display:none;"></span></button>
+    <button class="topbar-btn" id="btnDashboard" onclick="openDashboard()" style="display:none;">📈 看板</button>
     <button class="topbar-btn" onclick="logout()">🚪 登出</button>
   </div>
 </div>
@@ -709,10 +736,27 @@ body {
       <div class="input-wrap">
         <textarea class="input-box" id="input" placeholder="跟鹿小仓说点什么..." rows="1"
           onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
-      </div>
+      <button class="send-btn" id="sendBtn" onclick="sendMessage()">➤</button>
     </div>
   </div>
+</div>
+</div>
+
+<!-- ===== Dashboard View (D2-07) ===== -->
+<div class="dashboard-view" id="dashboardView">
+  <div class="dash-header">
+    <div class="dash-title">📈 数据看板</div>
+    <div class="dash-actions">
+      <div class="dash-tabs">
+        <button class="dash-tab active" id="tabStore" onclick="switchDashTab('store')">🏪 单店详情</button>
+        <button class="dash-tab" id="tabHQ" onclick="switchDashTab('hq')" style="display:none;">🏢 总部概览</button>
+      </div>
+      <select class="store-selector" id="dashStoreSelector" onchange="onDashStoreChange()" style="display:none;"></select>
+      <button class="dash-back" onclick="openChat()">💬 返回对话</button>
+      <button class="topbar-btn" onclick="loadDashboard()">🔄 刷新</button>
+    </div>
+  </div>
+  <div class="dash-body" id="dashBody"></div>
 </div>
 
 <!-- ===== Config Modal ===== -->
@@ -926,6 +970,8 @@ body {
   </div>
 </div>
 
+<!-- ECharts (D2-07 本地引入，避免外网依赖) -->
+<script src="/static/lib/echarts.min.js"></script>
 <script>
 // ===== Auth State =====
 let token = localStorage.getItem('lxc_token') || '';
@@ -1077,6 +1123,27 @@ async function afterLogin() {
   await loadDataAssets();
   // D2-02: start unread message polling
   startMsgPolling();
+  // D2-07: 看板初始化
+  initDashboard(stores, currentUser.role);
+}
+
+// ===== D2-07 Dashboard Init =====
+function initDashboard(stores, role) {
+  document.getElementById('btnDashboard').style.display = '';
+  const dashSel = document.getElementById('dashStoreSelector');
+  dashSel.innerHTML = '';
+  for (const s of stores) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    dashSel.appendChild(opt);
+  }
+  if (stores.length > 0) dashSel.value = stores[0].id;
+  if (role === 'admin' || role === 'manager') {
+    document.getElementById('tabHQ').style.display = '';
+  } else {
+    document.getElementById('tabHQ').style.display = 'none';
+  }
 }
 
 // ===== RBAC Dynamic UI Rendering =====
@@ -2055,6 +2122,237 @@ async function init() {
 }
 
 init();
+
+// ===== D2-07 Dashboard Logic =====
+const CHART_COLORS = ['#4fc3f7','#b388ff','#ffa726','#66bb6a','#ef5350','#42a5f5','#ab47bc','#ffca28','#26c6da','#8d6e63','#789262','#5c6bc0','#ec407a','#26a69a','#ff7043','#9ccc65'];
+let dashCharts = {};
+let currentDashTab = 'store';
+
+function openDashboard() {
+  document.getElementById('appBody').style.display = 'none';
+  document.getElementById('dashboardView').classList.add('show');
+  const role = currentUser ? currentUser.role : 'store_owner';
+  if (role === 'store_owner') {
+    switchDashTab('store', true);
+  } else {
+    switchDashTab(currentDashTab || 'store', true);
+  }
+  loadDashboard();
+}
+
+function openChat() {
+  document.getElementById('dashboardView').classList.remove('show');
+  document.getElementById('appBody').style.display = '';
+  disposeDashCharts();
+}
+
+function switchDashTab(tab, skipLoad) {
+  currentDashTab = tab;
+  document.getElementById('tabStore').classList.toggle('active', tab === 'store');
+  document.getElementById('tabHQ').classList.toggle('active', tab === 'hq');
+  const sel = document.getElementById('dashStoreSelector');
+  const isOwner = currentUser && currentUser.role === 'store_owner';
+  sel.style.display = (tab === 'store' && !isOwner) ? '' : 'none';
+  if (!skipLoad) loadDashboard();
+}
+
+function onDashStoreChange() {
+  if (currentDashTab === 'store') loadDashboard();
+}
+
+async function loadDashboard() {
+  disposeDashCharts();
+  const body = document.getElementById('dashBody');
+  if (typeof echarts === 'undefined') {
+    body.innerHTML = '<div class="dash-empty">⚠️ 图表库加载失败，请刷新页面</div>';
+    return;
+  }
+  body.innerHTML = '<div class="dash-empty">加载中...</div>';
+  try {
+    if (currentDashTab === 'hq') {
+      const resp = await api('/api/analytics/headquarters');
+      const d = await resp.json();
+      if (d.error) { body.innerHTML = '<div class="dash-empty">⚠️ ' + d.error + '</div>'; return; }
+      renderHQ(d);
+    } else {
+      const sel = document.getElementById('dashStoreSelector');
+      const sid = sel.value || (typeof currentStoreId !== 'undefined' ? currentStoreId : '');
+      const url = '/api/analytics/store' + (sid ? '?store_id=' + encodeURIComponent(sid) : '');
+      const resp = await api(url);
+      const d = await resp.json();
+      if (d.error) { body.innerHTML = '<div class="dash-empty">⚠️ ' + d.error + '</div>'; return; }
+      renderStoreDash(d);
+    }
+  } catch (e) {
+    body.innerHTML = '<div class="dash-empty">加载失败：' + e.message + '</div>';
+  }
+}
+
+function kpiCard(label, value, unit, sub) {
+  return '<div class="kpi-card"><div class="kpi-label">' + label + '</div>' +
+    '<div class="kpi-value">' + value + (unit ? '<span class="kpi-unit">' + unit + '</span>' : '') + '</div>' +
+    (sub ? '<div class="kpi-sub">' + sub + '</div>' : '') + '</div>';
+}
+
+function chartCard(id, title, sub, extra) {
+  const h = extra === 'full' ? '' : 'tall';
+  return '<div class="chart-card ' + (extra || '') + '"><div class="chart-title">' + title +
+    (sub ? ' <span style="font-size:11px;color:var(--text-faint);font-weight:400;">· ' + sub + '</span>' : '') +
+    '</div><div class="chart-box ' + h + '" id="' + id + '"></div></div>';
+}
+
+function disposeDashCharts() {
+  for (const k in dashCharts) { try { dashCharts[k].dispose(); } catch (e) {} }
+  dashCharts = {};
+}
+
+function renderStoreDash(d) {
+  const body = document.getElementById('dashBody');
+  const k = d.kpi, c = d.charts;
+  let html = '<div class="dash-kpi-row">';
+  html += kpiCard('SKU总数', k.sku_total, '个');
+  html += kpiCard('平均售价', k.avg_price, '元');
+  html += kpiCard('平均加价率', k.avg_markup, '%');
+  html += kpiCard('理论毛利额', Math.round(k.theoretical_gross_profit_total).toLocaleString(), '元', '假设全部售罄');
+  html += kpiCard('引流品', k.traffic_count, '个');
+  html += kpiCard('未读异常', k.alert_count, '条');
+  html += '</div><div class="dash-grid">';
+  html += chartCard('c_pie', '🥧 品类结构', '各品类SKU占比');
+  html += chartCard('c_tiers', '🎯 商品分层', '引流/利润/常规/长尾');
+  html += chartCard('c_price', '💰 价格带分布', '按售价分箱', 'tall');
+  html += chartCard('c_margin', '📊 毛利分布', '按毛利额分箱');
+  html += chartCard('c_radar', '🕸️ 品类健康度 Top6', 'SKU密度/毛利率/加价率/引流占比', 'full');
+  html += '</div>';
+  body.innerHTML = html;
+  renderPie('c_pie', c.category_pie);
+  renderTiers('c_tiers', c.product_tiers);
+  renderBar('c_price', c.price_band.labels, c.price_band.counts, 'SKU数');
+  renderBar('c_margin', c.margin_band.labels, c.margin_band.counts, 'SKU数');
+  const r = c.category_health_radar;
+  const idx = r.sku.map((v, i) => i).sort((a, b) => r.sku[b] - r.sku[a]).slice(0, 6);
+  const top = {
+    categories: idx.map(i => r.categories[i]),
+    sku: idx.map(i => r.sku[i]),
+    margin: idx.map(i => r.margin[i]),
+    markup: idx.map(i => r.markup[i]),
+    traffic_ratio: idx.map(i => r.traffic_ratio[i])
+  };
+  renderRadar('c_radar', top);
+}
+
+function renderHQ(d) {
+  const body = document.getElementById('dashBody');
+  let totalSku = 0, totalProfit = 0, totalAlert = 0;
+  d.stores.forEach(s => { totalSku += s.sku_total; totalProfit += s.theoretical_gross_profit_total; totalAlert += s.alert_count; });
+  let html = '<div class="dash-kpi-row">';
+  html += kpiCard('门店数', d.store_count, '家');
+  html += kpiCard('总SKU', totalSku, '个');
+  html += kpiCard('理论毛利额', Math.round(totalProfit).toLocaleString(), '元');
+  html += kpiCard('异常总数', totalAlert, '条');
+  html += '</div><div class="dash-grid">';
+  html += chartCard('h_rank_sku', '📦 门店SKU排行', '各门店SKU总数');
+  html += chartCard('h_rank_profit', '💰 理论毛利额排行', '各门店理论毛利额（元）');
+  html += chartCard('h_rank_alert', '🚨 异常消息排行', '各门店未读异常数');
+  html += chartCard('h_cat_total', '🥧 全局品类结构', '所有门店品类汇总', 'full');
+  html += '</div>';
+  body.innerHTML = html;
+  renderBarH('h_rank_sku', d.charts.rank_sku.names, d.charts.rank_sku.values, 'SKU数');
+  renderBarH('h_rank_profit', d.charts.rank_profit.names, d.charts.rank_profit.values, '元');
+  renderBarH('h_rank_alert', d.charts.rank_alert.names, d.charts.rank_alert.values, '条');
+  renderPie('h_cat_total', d.charts.category_total_pie);
+}
+
+function renderPie(elId, data) {
+  const chart = echarts.init(document.getElementById(elId));
+  chart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { type: 'scroll', orient: 'vertical', right: 0, top: 10, textStyle: { color: '#8b8f9e' } },
+    color: CHART_COLORS,
+    series: [{ type: 'pie', radius: ['38%', '68%'], center: ['40%', '55%'],
+      itemStyle: { borderColor: '#181a23', borderWidth: 2 },
+      label: { color: '#e8eaf0', formatter: '{b}\n{d}%' },
+      data: data }]
+  });
+  dashCharts[elId] = chart;
+}
+
+function renderTiers(elId, t) {
+  const chart = echarts.init(document.getElementById(elId));
+  const data = [
+    { name: '引流品', value: t.traffic },
+    { name: '利润品', value: t.profit },
+    { name: '常规品', value: t.regular },
+    { name: '长尾品', value: t.long_tail }
+  ];
+  chart.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+    legend: { bottom: 0, textStyle: { color: '#8b8f9e' } },
+    color: ['#4fc3f7', '#ffa726', '#b388ff', '#ef5350'],
+    series: [{ type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
+      itemStyle: { borderColor: '#181a23', borderWidth: 2 },
+      label: { color: '#e8eaf0', formatter: '{b}\n{c}' },
+      data: data }]
+  });
+  dashCharts[elId] = chart;
+}
+
+function renderBar(elId, labels, values, name) {
+  const chart = echarts.init(document.getElementById(elId));
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 50, right: 20, top: 20, bottom: 30 },
+    xAxis: { type: 'category', data: labels, axisLabel: { color: '#8b8f9e' }, axisLine: { lineStyle: { color: '#2a2d3a' } } },
+    yAxis: { type: 'value', name: name, nameTextStyle: { color: '#8b8f9e' }, axisLabel: { color: '#8b8f9e' }, splitLine: { lineStyle: { color: '#2a2d3a' } } },
+    series: [{ type: 'bar', data: values, itemStyle: { color: '#4fc3f7', borderRadius: [4, 4, 0, 0] }, barWidth: '55%' }]
+  });
+  dashCharts[elId] = chart;
+}
+
+function renderBarH(elId, names, values, name) {
+  const chart = echarts.init(document.getElementById(elId));
+  chart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 100, right: 30, top: 20, bottom: 20 },
+    xAxis: { type: 'value', name: name, nameTextStyle: { color: '#8b8f9e' }, axisLabel: { color: '#8b8f9e' }, splitLine: { lineStyle: { color: '#2a2d3a' } } },
+    yAxis: { type: 'category', data: names, axisLabel: { color: '#8b8f9e' }, axisLine: { lineStyle: { color: '#2a2d3a' } } },
+    series: [{ type: 'bar', data: values, itemStyle: { color: '#4fc3f7', borderRadius: [0, 4, 4, 0] }, barWidth: '55%' }]
+  });
+  dashCharts[elId] = chart;
+}
+
+function renderRadar(elId, r) {
+  const maxMargin = Math.max(20, Math.ceil(Math.max.apply(null, r.margin) / 5) * 5);
+  const maxMarkup = Math.max(300, Math.ceil(Math.max.apply(null, r.markup) / 50) * 50);
+  const chart = echarts.init(document.getElementById(elId));
+  chart.setOption({
+    tooltip: {},
+    legend: { data: r.categories, type: 'scroll', textStyle: { color: '#8b8f9e' }, bottom: 0 },
+    color: CHART_COLORS,
+    radar: {
+      indicator: [
+        { name: 'SKU密度', max: 100 },
+        { name: '毛利率', max: maxMargin },
+        { name: '加价率', max: maxMarkup },
+        { name: '引流占比', max: 100 }
+      ],
+      axisName: { color: '#8b8f9e' },
+      splitLine: { lineStyle: { color: '#2a2d3a' } },
+      splitArea: { areaStyle: { color: ['#181a23', '#11131a'] } }
+    },
+    series: [{
+      type: 'radar',
+      data: r.categories.map(function (cat, i) {
+        return { name: cat, value: [r.sku[i], r.margin[i], r.markup[i], r.traffic_ratio[i]] };
+      })
+    }]
+  });
+  dashCharts[elId] = chart;
+}
+
+window.addEventListener('resize', function () {
+  for (const k in dashCharts) { try { dashCharts[k].resize(); } catch (e) {} }
+});
+
 </script>
 </body>
 </html>
