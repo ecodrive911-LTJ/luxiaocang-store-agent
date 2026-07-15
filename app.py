@@ -1309,6 +1309,7 @@ async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(
         "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
         (json.dumps(corrected, ensure_ascii=False), time.time(), upload_id)
     )
+    # F2: 回写 price_data（人工修正后的可信数据）
     cname = correction.get("product_name") or None
     cspec = correction.get("product_spec") or None
     cprice_raw = correction.get("captured_price")
