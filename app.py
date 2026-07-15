@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from agent_loop import agent_loop, call_llm_stream, register_tool, TOOLS
+from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
 from auth import (
     hash_password, verify_password, create_session, verify_session,
     invalidate_session, get_user_stores, get_store_by_id, extract_token,
@@ -701,7 +701,7 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
     log_audit(user, "chat", resource_type="conversation", resource_id=req.session_id,
               store_id=store_id, details={"message": req.message[:200]})
 
-    # 注入门店上下文 + 角色上下文
+    # 注入门店上下文 + 角色上下文 + 告警上下文
     store_context = ""
     role_context = f"\n\n## 当前角色\n{ROLES.get(role, {}).get('label', role)}（{role}）"
     if store_id:
@@ -712,7 +712,10 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
     if role == "store_owner":
         role_context += "\n⚠️ 你是分店店主，仅能查看本店数据。不可查询竞品全局数据、不可查询其他门店数据、不可使用选址/建店/品牌管理功能。"
 
-    full_context = role_context + store_context
+    # D2-05: 注入最新告警上下文，让AI在对话中主动引用
+    alert_context = _get_alert_context(user, store_id)
+
+    full_context = role_context + store_context + alert_context
 
     async def stream_response():
         full_reply = ""
@@ -726,6 +729,102 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
+
+
+def _get_alert_context(user: dict, store_id: str = None) -> str:
+    """获取最新巡检告警，拼成上下文文本供 system prompt 注入"""
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    if role in ("admin", "manager") and not store_id:
+        rows = db_query(
+            "SELECT * FROM message_queue WHERE is_read=0 ORDER BY created_at DESC LIMIT 10",
+            fetch="all")
+    else:
+        sids = [store_id] if store_id else [s["id"] for s in get_user_stores(DB_PATH, user_id)]
+        if not sids:
+            return ""
+        placeholders = ",".join("?" * len(sids))
+        rows = db_query(
+            f"SELECT * FROM message_queue WHERE is_read=0 AND store_id IN ({placeholders}) ORDER BY created_at DESC LIMIT 10",
+            sids, fetch="all")
+    if not rows:
+        return ""
+    level_label = {"urgent": "🔴紧急", "warning": "🟡警告", "info": "🔵提醒"}
+    lines = []
+    for r in rows:
+        lvl = level_label.get(r.get("level", "info"), "🔵提醒")
+        lines.append(f"- {lvl} {r['title']}：{r.get('body', '')}")
+    return "\n\n## 最新巡检告警（未读）\n" + "\n".join(lines) + "\n\n⚠️ 重要：你应该在对话中主动引用这些告警，帮助用户了解当前经营问题。如果用户没有问及相关话题，可以在回答末尾简要提醒。"
+
+
+@app.get("/api/chat/proactive-opening")
+async def proactive_opening(user: dict = Depends(require_auth)):
+    """D2-05: AI主动开场——根据最新巡检告警和门店数据生成主动对话开场白。
+    前端在无对话历史时调用此端点，替代静态'你好我是鹿小仓'。"""
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    user_stores = get_user_stores(DB_PATH, user_id)
+    store_id = user_stores[0]["id"] if user_stores else None
+
+    # 收集上下文：门店信息 + 未读告警 + 最近价格数据
+    store_info_text = ""
+    if store_id:
+        s = get_store_by_id(DB_PATH, store_id, user_id)
+        if s:
+            store_info_text = f"门店：{s['name']}（{s.get('address', '')}）"
+
+    # 未读告警
+    alert_context = _get_alert_context(user, store_id)
+    alerts_brief = alert_context.replace("\n\n## 最新巡检告警（未读）\n", "").replace(
+        "\n\n⚠️ 重要：你应该在对话中主动引用这些告警，帮助用户了解当前经营问题。如果用户没有问及相关话题，可以在回答末尾简要提醒。", "")
+
+    # 最近价格数据摘要
+    price_summary = ""
+    if store_id:
+        price_rows = db_query(
+            "SELECT product_name, product_spec, price, competitor_store FROM price_data "
+            "WHERE store_id=? ORDER BY captured_at DESC LIMIT 5",
+            (store_id,), fetch="all")
+        if price_rows:
+            price_summary = "\n最近采集的价格数据：\n" + "\n".join(
+                f"- {r['product_name']} {r.get('product_spec') or ''}: ¥{r['price']:.2f}（竞品：{r.get('competitor_store') or '未知'}）"
+                for r in price_rows if r.get("price"))
+
+    # 构建开场白生成 prompt
+    role_label = ROLES.get(role, {}).get("label", role)
+    opening_prompt = f"""你是「鹿小仓」，一个便利店经营决策Agent。现在用户刚打开对话窗口，你需要生成一句主动开场白。
+
+## 当前用户
+角色：{role_label}
+{store_info_text}
+
+## 最新巡检告警
+{alerts_brief if alerts_brief.strip() else "（暂无告警）"}
+{price_summary}
+
+## 开场白要求
+1. 如果有告警：直接引用最紧急的告警内容，用具体数字说话（如"可口可乐比竞品贵0.8元"），并给出初步建议
+2. 如果无告警但有价格数据：简述最近采集情况，询问是否需要分析
+3. 如果都没有：友好问候并引导用户使用功能
+4. 控制在2-3句话，简洁有力，不要废话
+5. 不要说"你好我是鹿小仓"，直接说正事
+6. 用中文，口语化，像同事汇报工作一样自然
+
+请直接输出开场白，不要加任何前缀或解释。"""
+
+    try:
+        messages = [{"role": "user", "content": opening_prompt}]
+        opening_text = await call_llm_raw(messages, config, stream=False, timeout=30)
+        opening_text = opening_text.strip()
+        # 如果LLM失败（包含⚠️），返回降级消息
+        if opening_text.startswith("⚠️"):
+            if alerts_brief.strip():
+                opening_text = "📊 今日巡检发现以下异常，建议关注：\n" + alerts_brief.strip()[:200]
+            else:
+                opening_text = "📊 欢迎回来！目前各项指标正常，有需要随时找我。"
+        return {"opening": opening_text, "has_alerts": bool(alerts_brief.strip())}
+    except Exception as e:
+        return {"opening": f"📊 欢迎回来！随时可以问我经营分析、竞品比价、定价策略等问题。", "has_alerts": False, "error": str(e)}
 
 @app.get("/api/tools")
 async def list_tools():

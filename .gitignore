@@ -37,6 +37,8 @@ deploy*.py
 # Temp
 *.tmp
 *.bak
+_*.py
+_*.sh
 
 # Credentials
 CREDENTIALS.md

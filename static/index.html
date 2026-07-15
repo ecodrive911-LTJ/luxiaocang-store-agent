@@ -487,6 +487,11 @@ body {
 .welcome-card .wc-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; }
 .welcome-card .wc-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; }
 
+/* D2-05: Quick action chips */
+.quick-chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 0 16px 52px; }
+.quick-chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 14px; border: 1px solid var(--border,#e5e7eb); border-radius: 20px; font-size: 13px; color: var(--text-dim,#666); cursor: pointer; transition: all 0.2s; background: var(--bg-card,#fff); }
+.quick-chip:hover { border-color: var(--accent,#4f8cff); color: var(--accent,#4f8cff); background: rgba(79,140,255,0.05); }
+
 @media (max-width: 768px) {
   .sidebar { display: none; }
   .chat-messages { padding: 16px; }
@@ -1063,7 +1068,11 @@ async function afterLogin() {
     }
   } catch (e) {}
   // Load conversation history
-  await loadHistory();
+  const hasHistory = await loadHistory();
+  // D2-05: 无对话历史时，加载AI主动开场白
+  if (!hasHistory) {
+    await loadProactiveOpening();
+  }
   // Load data assets from API
   await loadDataAssets();
   // D2-02: start unread message polling
@@ -1244,6 +1253,9 @@ function sendMessage() {
     document.getElementById('welcome').style.display = 'none';
     hasMessages = true;
   }
+  // D2-05: 移除快捷操作芯片
+  const chips = document.querySelector('.quick-chips');
+  if (chips) chips.remove();
   addMessage('user', text);
   input.value = '';
   input.style.height = 'auto';
@@ -1365,9 +1377,41 @@ async function loadHistory() {
         addMessage(msg.role, msg.content, false);
       }
       scrollToBottom();
+      return true;
     }
   } catch (e) {
     console.error('Failed to load history:', e);
+  }
+  return false;
+}
+
+// D2-05: AI主动开场
+async function loadProactiveOpening() {
+  try {
+    const resp = await api('/api/chat/proactive-opening');
+    const data = await resp.json();
+    if (data.opening) {
+      // 隐藏静态欢迎页，显示AI主动开场白
+      document.getElementById('welcome').style.display = 'none';
+      hasMessages = true;
+      // 添加AI开场消息
+      addMessage('assistant', data.opening, true);
+      // 在消息下方添加快捷操作提示
+      const messages = document.getElementById('messages');
+      const chips = document.createElement('div');
+      chips.className = 'quick-chips';
+      chips.innerHTML = `
+        <div class="quick-chip" onclick="sendQuick('帮我做一次运营诊断')">📋 运营诊断</div>
+        <div class="quick-chip" onclick="sendQuick('查看比价分析')">⚖️ 比价分析</div>
+        <div class="quick-chip" onclick="sendQuick('帮我做定价策略')">🏷️ 定价策略</div>
+        <div class="quick-chip" onclick="sendQuick('选品规划建议')">📦 选品规划</div>
+      `;
+      messages.appendChild(chips);
+      scrollToBottom();
+    }
+  } catch (e) {
+    console.error('Failed to load proactive opening:', e);
+    // 降级：保持静态欢迎页
   }
 }
 
