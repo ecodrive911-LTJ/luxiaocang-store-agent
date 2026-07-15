@@ -33,7 +33,7 @@
 | — | 仓库清理 | `0e37638` | 2026-07-16 | 删除30个临时脚本，.gitignore加`_*`规则 |
 | D2-06 | 选品规划+商品分层 | `bebaed2` | 2026-07-16 | 4大分析引擎+5个API+4个Agent工具 |
 | D2-07 | 数据看板可视化 | `686ea58` | 2026-07-16 | ECharts看板+单店/总部双视图+角色隔离+static挂载 |
-| D2-09 | 门店画像&长期记忆 | — | 2026-07-16 | 新增memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后LLM抽取写回 + /api/memory/summary端点 |
+| D2-09 | 门店画像&长期记忆 | `a23c4a2` | 2026-07-16 | memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后流式LLM抽取写回 + /api/memory/summary端点；线上验证V2-08/V2-09通过(一次诊断对话写回4画像+4记忆) |
 
 ---
 
@@ -41,7 +41,7 @@
 
 | 优先级 | 编号 | 任务 | 预估 | 类型 | 依赖 | 说明 |
 |--------|------|------|------|------|------|------|
-| P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | ✅ 已实现，待线上验证（见变更记录） |
+| P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | ✅ 已完成（线上验证通过 V2-08/V2-09） |
 | P1 | D2-08 | 用户偏好学习 | 2天 | 后端 | D2-09 | 记录高频查询→调整AI回答优先级 |
 | P2 | D2-04 | 小程序核心页面 | 7天 | 前端 | 微信注册 | 首页/任务页/AI咨询页/我的 |
 | P2 | D2-10 | 微信小程序上线 | 3天 | 运维 | D2-04 | 提交审核+域名白名单+灰度发布 |
@@ -86,3 +86,4 @@
 - **2026-07-16**：D2-06完成。新增product_analysis.py(453行)+5个API端点+4个Agent工具。下一步：D2-07数据看板。
 - **2026-07-16**：D2-07完成。新增analytics.py(307行)+2个聚合API+ECharts看板前端。修复require_auth的user键(user_id非id)。下一步：D2-09门店画像。
 - **2026-07-16**：D2-09门店画像&长期记忆已实现（代码层）。新增memory.py（召回build_memory_context + 对话后LLM抽取写回extract_and_save_memory + 查询get_memory_summary）；app.py的init_db新增store_profiles/agent_memory两表（store_id TEXT匹配UUID）；chat与proactive_opening端点注入画像上下文；对话结束触发抽取写回。新增GET /api/memory/summary。逻辑自测(_test_memory.py)全过。待部署阿里云+真实对话验证V2-08/V2-09。下一步：D2-08用户偏好学习。
+- **2026-07-16**：D2-09线上验证+修复。初版抽取用非流式call_llm_raw(timeout=90)且prompt schema与解析器不匹配→真实对话写回0条。修复：①抽取改用流式call_llm_stream(首token秒回，整体~30s vs 非流式~90s，快3倍)；②重写抽取prompt强制严格键名(profile_type/content/confidence、memory_type/summary/importance)并禁止其它键名；③解析器加类型归一化(_PROFILE_TYPE_ALIAS/_MEMORY_TYPE_ALIAS)容忍id/type/name/subject_id等异构键；④持久化(save_message+抽取)改为脱离请求生命周期的asyncio后台任务，客户端SSE超时/刷新断开也不丢记忆。线上验证：一次诊断对话(405字)→抽取写回4画像+4记忆(V2-09 PASS)，二次对话召回注入正常(V2-08 PASS)。下一步：D2-08用户偏好学习。
