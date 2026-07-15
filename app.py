@@ -764,22 +764,44 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
 
     async def stream_response():
         full_reply = ""
+        _persist_done = asyncio.Event()
+
+        # D2-09: 持久化 + 记忆抽取放在「脱离请求生命周期」的后台任务中，
+        # 即使客户端中途断开（SSE 超时/刷新），服务端仍会落库，不丢记忆。
+        async def _persist_turn():
+            try:
+                # 等待本轮流式输出结束（正常完成或被客户端断开触发 finally）
+                await asyncio.wait_for(_persist_done.wait(), timeout=600)
+            except Exception:
+                pass
+            text = full_reply
+            if not (store_id and text.strip()):
+                return
+            try:
+                save_message("assistant", text, req.session_id, user_id, store_id)
+            except Exception:
+                pass
+            # D2-09: LLM 抽取结构化门店画像 & Agent记忆落库（异常不阻断）
+            if store_id and text.strip():
+                try:
+                    await extract_and_save_memory(
+                        DB_PATH, store_id, req.message, text, config,
+                        session_id=req.session_id, store_name=store_name_for_memory)
+                except Exception:
+                    pass
+
+        # 用 create_task 启动，不受请求 cancel scope 影响（客户端断开也不会被取消）
+        _bg = asyncio.create_task(_persist_turn())
+
         try:
             async for chunk in agent_loop(req.message, history, config, store_context=full_context):
                 full_reply += chunk
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
-            save_message("assistant", full_reply, req.session_id, user_id, store_id)
-            # D2-09: 对话结束，LLM抽取结构化记忆落库（后台动作，异常不阻断主链路）
-            if store_id and full_reply.strip():
-                try:
-                    await extract_and_save_memory(
-                        DB_PATH, store_id, req.message, full_reply, config,
-                        session_id=req.session_id, store_name=store_name_for_memory)
-                except Exception:
-                    pass
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
+        finally:
+            _persist_done.set()
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
 

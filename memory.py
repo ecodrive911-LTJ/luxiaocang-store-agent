@@ -39,6 +39,21 @@ MEMORY_TYPES = {
     "lesson": "教训",
 }
 
+# 类型归一化（LLM 偶尔会返回 id/type/name/subject_id 等异构键名或中文，这里归一）
+_PROFILE_TYPE_ALIAS = {
+    "business_feature": "business_feature", "经营特征": "business_feature", "business": "business_feature",
+    "historical_issue": "historical_issue", "历史问题": "historical_issue", "issue": "historical_issue",
+    "pricing_preference": "pricing_preference", "定价偏好": "pricing_preference", "pricing": "pricing_preference",
+    "category_strength": "category_strength", "品类优势": "category_strength", "strength": "category_strength",
+    "category_weakness": "category_weakness", "品类劣势": "category_weakness", "weakness": "category_weakness",
+}
+_MEMORY_TYPE_ALIAS = {
+    "decision": "decision", "决策": "decision",
+    "event": "event", "事件": "event",
+    "preference": "preference", "偏好": "preference",
+    "lesson": "lesson", "教训": "lesson",
+}
+
 _PROFILE_CAP = 20      # 召回时单店画像上限
 _MEMORY_CAP = 10       # 召回时单店记忆上限
 _MEMORY_STORE_CAP = 100  # 单店活跃记忆软上限，超过则清理低重要度旧记忆
@@ -215,6 +230,7 @@ def _insert_memory(db_path, store_id: str, memory_type: str, summary: str,
 _EXTRACT_SYS = (
     "你是鹿小仓的记忆抽取器。从一段便利店店主与AI经营助手的对话中，抽取值得长期记忆的"
     "结构化信息。只抽取确定、可复用的事实/决策/偏好/教训；若没有值得记忆的内容，返回空列表。"
+    "你必须严格按下方指定的JSON键名输出，禁止使用 id/type/name/subject_id 等其它键名。"
 )
 
 _EXTRACT_USER_TMPL = """门店：{store_name}（store_id={store_id}）
@@ -225,25 +241,27 @@ _EXTRACT_USER_TMPL = """门店：{store_name}（store_id={store_id}）
 
 【AI】{assistant_reply}
 
-请抽取以下两类长期记忆：
+请抽取以下两类长期记忆，并严格按给定JSON结构输出（键名必须完全一致，不得替换为其它名称）：
 
-1) store_profiles（门店画像），profile_type 取其一：
-   - business_feature 经营特征（客单价、客流时段、主力客群等）
-   - historical_issue 历史问题（曾发生并已处理的经营问题）
-   - pricing_preference 定价偏好（店主对定价的倾向，如"不愿低于进货价"）
-   - category_strength 品类优势（哪些品类表现好）
-   - category_weakness 品类劣势（哪些品类表现差/滞销）
-   每条格式：{{"profile_type": "...", "content": "一句话事实，简洁可复用", "confidence": 0.0~1.0}}
+1) store_profiles（门店画像），每条对象必须包含：
+   - "profile_type"：只能是以下5个值之一：
+       "business_feature"（经营特征：客单价/客流时段/主力客群等）
+       "historical_issue"（历史问题：曾发生并已处理的经营问题）
+       "pricing_preference"（定价偏好：店主对定价的倾向，如"不愿低于进货价"）
+       "category_strength"（品类优势：哪些品类表现好）
+       "category_weakness"（品类劣势：哪些品类表现差/滞销）
+   - "content"：一句话事实，简洁可复用（中文）
+   - "confidence"：0.0~1.0 的置信度数字
+   示例：{{"profile_type": "business_feature", "content": "主力客群为周边社区居民与写字楼上班族", "confidence": 0.8}}
 
-2) agent_memory（经营记忆），memory_type 取其一：
-   - decision 决策（店主拍板的经营决策）
-   - event 事件（重要经营事件）
-   - preference 偏好（店主个人偏好）
-   - lesson 教训（踩过的坑/学到的经验）
-   每条格式：{{"memory_type": "...", "summary": "一句话总结", "importance": 1~3}}
+2) agent_memory（经营记忆），每条对象必须包含：
+   - "memory_type"：只能是以下4个值之一："decision"（决策）、"event"（事件）、"preference"（偏好）、"lesson"（教训）
+   - "summary"：一句话总结（中文）
+   - "importance"：1~3 的整数重要度
+   示例：{{"memory_type": "preference", "summary": "店主偏好用红色价签标注促销商品", "importance": 2}}
 
-只输出如下JSON，不要任何额外文字或代码块标记：
-{{"profiles": [...], "memories": [...]}}"""
+只输出如下JSON，不要任何额外文字，也不要用 ``` 代码块包裹：
+{{"profiles": [ ... ], "memories": [ ... ]}}"""
 
 
 async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
@@ -258,7 +276,7 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
     if not store_id or not (user_msg and assistant_reply):
         return result
     try:
-        from agent_loop import call_llm_raw
+        from agent_loop import call_llm_stream
         user_block = _EXTRACT_USER_TMPL.format(
             store_name=store_name or store_id,
             store_id=store_id,
@@ -269,7 +287,16 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
             {"role": "system", "content": _EXTRACT_SYS},
             {"role": "user", "content": user_block},
         ]
-        raw = await call_llm_raw(messages, config, stream=False, timeout=40)
+        print(f"[D2-09] extract start store={store_id} msg={len(user_msg)}B reply={len(assistant_reply)}B", flush=True)
+        # 用流式调用（比非流式快很多：首 token 秒回，整体 ~30s vs 非流式 ~90s）
+        parts = []
+        async for chunk in call_llm_stream(messages, config, timeout=150):
+            parts.append(chunk)
+        raw = "".join(parts)
+        print(f"[D2-09] extract raw(head): {raw[:200]!r}", flush=True)
+        if raw.startswith("⚠️"):
+            print(f"[D2-09] extract: LLM error returned, skip", flush=True)
+            return result
         # 容错：剥离可能的 ```json 代码块标记
         raw = raw.strip()
         if raw.startswith("```"):
@@ -280,6 +307,7 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
         start = raw.find("{")
         end = raw.rfind("}")
         if start == -1 or end == -1 or end <= start:
+            print(f"[D2-09] extract: no JSON found, skip", flush=True)
             return result
         data = json.loads(raw[start:end + 1])
 
@@ -293,8 +321,14 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
         for p in profiles:
             if not isinstance(p, dict):
                 continue
-            ptype = p.get("profile_type")
-            content = p.get("content") or p.get("text") or ""
+            # 容忍异构键名 + 类型归一化
+            raw_type = p.get("profile_type") or p.get("type") or p.get("category") or ""
+            ptype = _PROFILE_TYPE_ALIAS.get(str(raw_type).strip().lower())
+            if not ptype:
+                continue
+            content = (p.get("content") or p.get("text") or p.get("name") or p.get("detail") or "").strip()
+            if len(content) < 2:
+                continue
             conf = float(p.get("confidence", 0.5) or 0.5)
             if conf < 0.4:  # 低置信度不入库，避免噪声
                 continue
@@ -304,8 +338,13 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
         for m in memories:
             if not isinstance(m, dict):
                 continue
-            mtype = m.get("memory_type")
-            summary = m.get("summary") or ""
+            raw_type = m.get("memory_type") or m.get("type") or m.get("category") or ""
+            mtype = _MEMORY_TYPE_ALIAS.get(str(raw_type).strip().lower())
+            if not mtype:
+                continue
+            summary = (m.get("summary") or m.get("content") or m.get("text") or "").strip()
+            if len(summary) < 2:
+                continue
             imp = int(m.get("importance", 1) or 1)
             if imp < 1:
                 continue
@@ -315,9 +354,11 @@ async def extract_and_save_memory(db_path, store_id: str, user_msg: str,
             result["saved_memories"] += 1
 
         result["skipped"] = (result["saved_profiles"] == 0 and result["saved_memories"] == 0)
-    except Exception:
+        print(f"[D2-09] extract done saved_profiles={result['saved_profiles']} saved_memories={result['saved_memories']}", flush=True)
+    except Exception as e:
         # 抽取失败不影响主流程
         result["error"] = True
+        print(f"[D2-09] extract ERROR: {type(e).__name__}: {e}", flush=True)
     return result
 
 
