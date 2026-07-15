@@ -28,6 +28,7 @@ from product_analysis import (
     full_analysis as pa_full,
 )
 from analytics import compute_store_dashboard, compute_hq_dashboard
+from build_store import build_store_plan as bs_plan
 from auth import (
     hash_password, verify_password, create_session, verify_session,
     invalidate_session, get_user_stores, get_store_by_id, extract_token,
@@ -1136,6 +1137,26 @@ async def api_full_analysis(store_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"分析失败: {e}")
+
+
+# ===== 建店规划引擎 (D2-后续) =====
+
+@app.get("/api/build_store/plan")
+async def api_build_store_plan(
+    area: float,
+    tier: str = "standard",
+    has_fresh: bool = None,
+    has_tobacco: bool = True,
+    user: dict = Depends(require_auth),
+):
+    """建店规划：按卖场面积生成品类权重、SKU 推算与货架方案（admin/manager 可用）"""
+    try:
+        plan = bs_plan(area_m2=area, tier=tier, has_fresh=has_fresh, has_tobacco=has_tobacco)
+        return plan.to_dict()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"建店规划失败: {e}")
 
 
 # ===== 数据看板接口 (D2-07) =====

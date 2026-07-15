@@ -414,3 +414,19 @@ def basket_analysis_tool(store_id: str):
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "database.db")
     result = basket_analysis(db_path, store_id)
     return json.dumps(result, ensure_ascii=False, default=str)
+
+
+@register_tool(
+    name="build_store_plan",
+    description="建店规划引擎：输入门店卖场面积(㎡)，生成品类权重规划、首批SKU推算数量、货架组数/冷柜数量/动线方案。用于新店筹建或门店改造评估。",
+    parameters={
+        "area": "卖场面积(平方米)，必填，例如 100",
+        "tier": "门店层级: standard/premium/community，默认 standard",
+        "has_fresh": "是否规划鲜食岛(True/False)，默认按面积自动判定(≥80㎡为True)",
+        "has_tobacco": "是否含烟证(默认 True)",
+    }
+)
+def build_store_plan_tool(area: float, tier: str = "standard", has_fresh: bool = None, has_tobacco: bool = True):
+    from build_store import build_store_plan
+    plan = build_store_plan(area_m2=area, tier=tier, has_fresh=has_fresh, has_tobacco=has_tobacco)
+    return json.dumps(plan.to_dict(), ensure_ascii=False, default=str)
