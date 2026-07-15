@@ -577,39 +577,39 @@ body {
     </div>
 
     <!-- Data Assets -->
-    <div class="side-section">
+    <div class="side-section" id="sectionDataAssets">
       <div class="side-title">▸ 数据资产</div>
-      <div class="side-card">
-        <div class="asset-item"><span class="asset-name">鹿小仓广安店</span><span class="asset-count">2,941</span></div>
-        <div class="asset-item"><span class="asset-name">鹿小仓财富店</span><span class="asset-count">1,386</span></div>
-        <div class="asset-item"><span class="asset-name">小柴购（竞品）</span><span class="asset-count">7,659</span></div>
-        <div class="asset-item"><span class="asset-name">厉臣超市（竞品）</span><span class="asset-count">1,996</span></div>
-        <div class="asset-item"><span class="asset-name">商圈POI扫描</span><span class="asset-count">1,396</span></div>
-        <div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text-faint);">
-          总计 13,982 条商品数据
+      <div class="side-card" id="dataAssetsCard">
+        <div class="asset-item" id="asset-guangan"><span class="asset-name">鹿小仓广安店</span><span class="asset-count">—</span></div>
+        <div class="asset-item" id="asset-caifu"><span class="asset-name">鹿小仓财富店</span><span class="asset-count">—</span></div>
+        <div class="asset-item" id="asset-comp1"><span class="asset-name">小柴购（竞品）</span><span class="asset-count">—</span></div>
+        <div class="asset-item" id="asset-comp2"><span class="asset-name">厉臣超市（竞品）</span><span class="asset-count">—</span></div>
+        <div class="asset-item" id="asset-poi"><span class="asset-name">商圈POI扫描</span><span class="asset-count">—</span></div>
+        <div id="assetTotal" style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px;color:var(--text-faint);">
+          总计 — 条商品数据
         </div>
       </div>
     </div>
 
     <!-- Capabilities -->
-    <div class="side-section">
+    <div class="side-section" id="sectionCapabilities">
       <div class="side-title">▸ 能力模块</div>
-      <div class="side-card">
-        <div class="cap-item"><span class="cap-dot active"></span> 模块0 · 数据采集</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块1 · 选址评估</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块2 · 建店规划</div>
-        <div class="cap-item"><span class="cap-dot partial"></span> 模块3 · 选品规划</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块4 · 定价策略</div>
-        <div class="cap-item"><span class="cap-dot partial"></span> 模块5 · 供应链</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块6 · 品牌管理</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块7 · 运营诊断</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块8 · 促销营销</div>
-        <div class="cap-item"><span class="cap-dot ready"></span> 模块9 · 财务管理</div>
+      <div class="side-card" id="capabilitiesCard">
+        <div class="cap-item" data-module="0"><span class="cap-dot active"></span> 模块0 · 数据采集</div>
+        <div class="cap-item" data-module="1"><span class="cap-dot ready"></span> 模块1 · 选址评估</div>
+        <div class="cap-item" data-module="2"><span class="cap-dot ready"></span> 模块2 · 建店规划</div>
+        <div class="cap-item" data-module="3"><span class="cap-dot partial"></span> 模块3 · 选品规划</div>
+        <div class="cap-item" data-module="4"><span class="cap-dot ready"></span> 模块4 · 定价策略</div>
+        <div class="cap-item" data-module="5"><span class="cap-dot partial"></span> 模块5 · 供应链</div>
+        <div class="cap-item" data-module="6"><span class="cap-dot ready"></span> 模块6 · 品牌管理</div>
+        <div class="cap-item" data-module="7"><span class="cap-dot ready"></span> 模块7 · 运营诊断</div>
+        <div class="cap-item" data-module="8"><span class="cap-dot ready"></span> 模块8 · 促销营销</div>
+        <div class="cap-item" data-module="9"><span class="cap-dot ready"></span> 模块9 · 财务管理</div>
       </div>
     </div>
 
     <!-- System Config -->
-    <div class="side-section">
+    <div class="side-section" id="sectionSystem">
       <div class="side-title">▸ 系统</div>
       <div class="side-card">
         <div class="config-item"><span>大模型</span><span class="config-val off" id="cfgLlm">未配置</span></div>
@@ -619,7 +619,7 @@ body {
     </div>
 
     <!-- Expert Team -->
-    <div class="side-section">
+    <div class="side-section" id="sectionExperts">
       <div class="side-title">▸ 专家团队</div>
       <div class="side-card" style="font-size:12px;line-height:2;color:var(--text-dim);">
         📈 消费品分析师<br>
@@ -641,32 +641,32 @@ body {
           直接跟我说话，或者说"你需要我做什么"——我会引导你。
         </div>
         <div class="welcome-cards">
-          <div class="welcome-card" onclick="sendQuick('帮我做一次广安店的运营诊断')">
+          <div class="welcome-card" id="wc-diagnosis" onclick="sendQuick('帮我做一次广安店的运营诊断')">
             <div class="wc-icon">📋</div>
             <div class="wc-title">运营诊断</div>
             <div class="wc-desc">分析销售趋势、品类贡献、滞销品</div>
           </div>
-          <div class="welcome-card" onclick="sendQuick('我要采集竞品价格')">
+          <div class="welcome-card" id="wc-collect" onclick="sendQuick('我要采集竞品价格')">
             <div class="wc-icon">🔍</div>
             <div class="wc-title">竞品采集</div>
             <div class="wc-desc">打开美团店铺页，我自动采集商品价格</div>
           </div>
-          <div class="welcome-card" onclick="sendQuick('扫描广安购物中心周边商圈')">
+          <div class="welcome-card" id="wc-poi" onclick="sendQuick('扫描广安购物中心周边商圈')">
             <div class="wc-icon">📍</div>
             <div class="wc-title">商圈扫描</div>
             <div class="wc-desc">输入地址，扫描周边POI和竞品分布</div>
           </div>
-          <div class="welcome-card" onclick="sendQuick('广安店和财富店对比分析')">
+          <div class="welcome-card" id="wc-compare" onclick="sendQuick('广安店和财富店对比分析')">
             <div class="wc-icon">⚖️</div>
             <div class="wc-title">门店对比</div>
             <div class="wc-desc">对比两家店的SKU、品类、毛利结构</div>
           </div>
-          <div class="welcome-card" onclick="sendQuick('帮我做选品规划')">
+          <div class="welcome-card" id="wc-select" onclick="sendQuick('帮我做选品规划')">
             <div class="wc-icon">📦</div>
             <div class="wc-title">选品规划</div>
             <div class="wc-desc">基于竞品数据推荐品类和SKU</div>
           </div>
-          <div class="welcome-card" onclick="sendQuick('帮我做定价策略分析')">
+          <div class="welcome-card" id="wc-pricing" onclick="sendQuick('帮我做定价策略分析')">
             <div class="wc-icon">🏷️</div>
             <div class="wc-title">定价策略</div>
             <div class="wc-desc">毛利分析、价格带、引流品定价</div>
@@ -959,38 +959,8 @@ async function afterLogin() {
     currentUser = data.user;
     const stores = data.stores || [];
 
-    // 根据角色控制 UI
-    const role = currentUser.role || 'store_owner';
-    if (role === 'admin') {
-      document.getElementById('btnTasks').style.display = '';
-      document.getElementById('btnSettings').style.display = '';
-      document.getElementById('btnUsers').style.display = '';
-    } else if (role === 'manager') {
-      document.getElementById('btnTasks').style.display = '';
-      document.getElementById('btnSettings').style.display = '';
-      document.getElementById('btnUsers').style.display = 'none';
-    } else {
-      document.getElementById('btnTasks').style.display = '';
-      document.getElementById('btnSettings').style.display = 'none';
-      document.getElementById('btnUsers').style.display = 'none';
-    }
-    // Update sidebar
-    document.getElementById('sidebarAvatar').textContent = (currentUser.display_name || 'U')[0];
-    document.getElementById('sidebarUsername').textContent = currentUser.display_name || currentUser.username;
-    document.getElementById('sidebarRole').textContent = {admin:'管理员', manager:'总部管理', store_owner:'分店店主'}[currentUser.role] || currentUser.role;
-    // Populate store selector
-    const sel = document.getElementById('storeSelector');
-    sel.innerHTML = '<option value="">选择门店</option>';
-    for (const s of stores) {
-      const opt = document.createElement('option');
-      opt.value = s.id;
-      opt.textContent = s.name;
-      sel.appendChild(opt);
-    }
-    if (stores.length > 0) {
-      sel.value = stores[0].id;
-      currentStoreId = stores[0].id;
-    }
+    // ===== RBAC Dynamic Rendering =====
+    renderRoleBasedUI(currentUser.role, stores);
   } catch (e) {
     console.error('Failed to load user info:', e);
   }
@@ -1006,6 +976,145 @@ async function afterLogin() {
   } catch (e) {}
   // Load conversation history
   await loadHistory();
+  // Load data assets from API
+  await loadDataAssets();
+}
+
+// ===== RBAC Dynamic UI Rendering =====
+function renderRoleBasedUI(role, stores) {
+  const isAdmin = (role === 'admin');
+  const isManager = (role === 'manager');
+  const isStoreOwner = (role === 'store_owner');
+
+  // === Region 1: Top-right buttons ===
+  if (isAdmin) {
+    document.getElementById('btnTasks').style.display = '';
+    document.getElementById('btnSettings').style.display = '';
+    document.getElementById('btnUsers').style.display = '';
+  } else if (isManager) {
+    document.getElementById('btnTasks').style.display = '';
+    document.getElementById('btnSettings').style.display = '';
+    document.getElementById('btnUsers').style.display = 'none';
+  } else {
+    document.getElementById('btnTasks').style.display = '';
+    document.getElementById('btnSettings').style.display = 'none';
+    document.getElementById('btnUsers').style.display = 'none';
+  }
+
+  // === Region 2: Store Selector ===
+  const sel = document.getElementById('storeSelector');
+  sel.innerHTML = '<option value="">选择门店</option>';
+  for (const s of stores) {
+    const opt = document.createElement('option');
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  }
+  if (stores.length > 0) {
+    sel.value = stores[0].id;
+    currentStoreId = stores[0].id;
+  }
+  if (isStoreOwner) {
+    sel.disabled = true;
+    sel.style.opacity = '0.7';
+    sel.style.cursor = 'not-allowed';
+    sel.title = '分店店主不可切换门店';
+  }
+
+  // === Region 3: Sidebar - User Info ===
+  document.getElementById('sidebarAvatar').textContent = (currentUser.display_name || 'U')[0];
+  document.getElementById('sidebarUsername').textContent = currentUser.display_name || currentUser.username;
+  document.getElementById('sidebarRole').textContent = {admin:'管理员', manager:'总部管理', store_owner:'分店店主'}[role] || role;
+
+  // === Region 4: Sidebar - Capability Modules ===
+  // Store owner: hide modules 1 (选址评估), 2 (建店规划), 6 (品牌管理)
+  const hiddenModules = [1, 2, 6];
+  const moduleLabels = {1:'选址评估', 2:'建店规划', 6:'品牌管理'};
+  document.querySelectorAll('#capabilitiesCard .cap-item').forEach(el => {
+    const modNum = parseInt(el.dataset.module);
+    if (isStoreOwner && hiddenModules.includes(modNum)) {
+      el.style.display = 'none';
+    } else {
+      el.style.display = '';
+    }
+  });
+
+  // === Region 5: Sidebar - Data Assets (deferred to loadDataAssets) ===
+
+  // === Region 6: Sidebar - System Panel ===
+  if (isStoreOwner) {
+    document.getElementById('sectionSystem').style.display = 'none';
+  }
+
+  // === Region 7: Sidebar - Expert Team ===
+  if (isStoreOwner) {
+    document.getElementById('sectionExperts').style.display = 'none';
+  }
+
+  // === Region 8: Welcome Screen Quick Cards ===
+  // Store owner hides: POI scan (商圈扫描), Store compare (门店对比)
+  if (isStoreOwner) {
+    const wcPoi = document.getElementById('wc-poi');
+    const wcCompare = document.getElementById('wc-compare');
+    if (wcPoi) wcPoi.style.display = 'none';
+    if (wcCompare) wcCompare.style.display = 'none';
+  }
+}
+
+// ===== Dynamic Data Assets Loader =====
+async function loadDataAssets() {
+  try {
+    const resp = await api('/api/data/assets');
+    const data = await resp.json();
+    const assets = data.assets || {};
+    const role = currentUser.role || 'store_owner';
+    const isStoreOwner = (role === 'store_owner');
+
+    const assetGuangan = document.getElementById('asset-guangan');
+    const assetCaifu = document.getElementById('asset-caifu');
+    const assetComp1 = document.getElementById('asset-comp1');
+    const assetComp2 = document.getElementById('asset-comp2');
+    const assetPoi = document.getElementById('asset-poi');
+    const assetTotal = document.getElementById('assetTotal');
+
+    if (isStoreOwner) {
+      // Store owner: only show own store data, hide competitors and POI
+      const myStoreName = document.getElementById('storeSelector').options[document.getElementById('storeSelector').selectedIndex]?.text || '本店';
+      const myStoreCount = assets['鹿小仓广安店'] || assets['鹿小仓财富店'] || assets['self_store_count'] || 0;
+      
+      if (assetGuangan) assetGuangan.style.display = '';
+      if (assetGuangan) assetGuangan.querySelector('.asset-name').textContent = myStoreName;
+      if (assetGuangan) assetGuangan.querySelector('.asset-count').textContent = myStoreCount.toLocaleString();
+      
+      if (assetCaifu) assetCaifu.style.display = 'none';
+      if (assetComp1) assetComp1.style.display = 'none';
+      if (assetComp2) assetComp2.style.display = 'none';
+      if (assetPoi) assetPoi.style.display = 'none';
+      
+      if (assetTotal) {
+        assetTotal.textContent = `本店 ${myStoreCount.toLocaleString()} 条商品数据`;
+        assetTotal.style.color = 'var(--text-dim)';
+      }
+    } else {
+      // Admin/Manager: show all
+      const counts = {guangan: 0, caifu: 0, comp1: 0, comp2: 0, poi: 0};
+      try {
+        if (assetGuangan) assetGuangan.querySelector('.asset-count').textContent = (assets['鹿小仓广安店'] || '—').toLocaleString ? (assets['鹿小仓广安店'] || '—').toString() : '—';
+        if (assetCaifu) assetCaifu.querySelector('.asset-count').textContent = (assets['鹿小仓财富店'] || '—').toLocaleString ? (assets['鹿小仓财富店'] || '—').toString() : '—';
+        if (assetComp1) assetComp1.querySelector('.asset-count').textContent = (assets['小柴购（竞品）'] || '—').toLocaleString ? (assets['小柴购（竞品）'] || '—').toString() : '—';
+        if (assetComp2) assetComp2.querySelector('.asset-count').textContent = (assets['厉臣超市（竞品）'] || '—').toLocaleString ? (assets['厉臣超市（竞品）'] || '—').toString() : '—';
+        if (assetPoi) assetPoi.querySelector('.asset-count').textContent = (assets['商圈POI扫描'] || '—').toLocaleString ? (assets['商圈POI扫描'] || '—').toString() : '—';
+      } catch (e) {}
+      if (assetTotal) {
+        const total = Object.values(assets).reduce((a,b) => a + (typeof b === 'number' ? b : 0), 0);
+        if (total > 0) {
+          assetTotal.textContent = `总计 ${total.toLocaleString()} 条商品数据`;
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Failed to load data assets:', e);
+  }
 }
 
 // ===== Store Selection =====

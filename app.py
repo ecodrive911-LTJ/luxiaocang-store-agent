@@ -580,26 +580,73 @@ async def status(user: dict = Depends(require_auth_optional)):
 
 @app.get("/api/data/assets")
 async def data_assets(user: dict = Depends(require_auth)):
-    """数据资产（按用户隔离）"""
+    """数据资产（按角色隔离）
+    - admin/manager：全部数据（两家门店+竞品+商圈）
+    - store_owner：仅本店数据，不显示竞品和商圈
+    """
     user_id = user["user_id"]
+    role = user.get("role", "store_owner")
+    user_stores = get_user_stores(DB_PATH, user_id)
+
     rows = db_query("SELECT * FROM data_assets WHERE user_id=? ORDER BY created_at DESC", (user_id,), fetch="all")
-    builtin = [
-        {"name": "鹿小仓广安店", "rows": 2941, "type": "门店"},
-        {"name": "鹿小仓财富店", "rows": 1386, "type": "门店"},
-        {"name": "小柴购（竞品）", "rows": 7659, "type": "竞品"},
-        {"name": "厉臣超市（竞品）", "rows": 1996, "type": "竞品"},
-        {"name": "商圈POI扫描", "rows": 1396, "type": "商圈"},
-    ]
-    return {"builtin": builtin, "custom": rows, "total_sku": 13982}
+
+    if role == "store_owner":
+        # Store owner: only own store data
+        my_store_name = user_stores[0]["name"] if user_stores else "本店"
+        # Try to count actual SKUs for this store from price_data or other tables
+        store_id = user_stores[0]["id"] if user_stores else None
+        store_count = 0
+        if store_id:
+            try:
+                count_row = db_query(
+                    "SELECT COUNT(*) as cnt FROM price_data WHERE store_id=?",
+                    (store_id,), fetch="one"
+                )
+                if count_row:
+                    store_count = count_row["cnt"]
+            except:
+                pass
+        # If no price_data, fall back to builtin counts
+        if store_count == 0 and user_stores:
+            # Check store name
+            name = user_stores[0]["name"]
+            if "广安" in name:
+                store_count = 2941
+            elif "财富" in name:
+                store_count = 1386
+
+        assets = {my_store_name: store_count}
+        return {"assets": assets, "role": "store_owner", "store_name": my_store_name}
+    else:
+        # Admin / Manager: full data
+        builtin = {
+            "鹿小仓广安店": 2941,
+            "鹿小仓财富店": 1386,
+            "小柴购（竞品）": 7659,
+            "厉臣超市（竞品）": 1996,
+            "商圈POI扫描": 1396,
+        }
+        total = sum(builtin.values())
+        return {"assets": builtin, "total_sku": total, "role": role, "custom": rows}
 
 @app.post("/api/chat")
 async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
-    """对话（按用户和门店隔离）"""
+    """对话（按角色和门店隔离）
+    - store_owner：强制绑定其唯一门店，不可传入其他门店ID
+    - admin/manager：可指定任意有权限的门店
+    """
     user_id = user["user_id"]
+    role = user.get("role", "store_owner")
+    user_stores = get_user_stores(DB_PATH, user_id)
     store_id = req.store_id
 
-    # 如果指定了门店，验证权限
-    if store_id:
+    # Store owner: auto-bind to their only store, ignore passed store_id
+    if role == "store_owner":
+        if not user_stores:
+            raise HTTPException(status_code=403, detail="未绑定门店，请联系管理员")
+        store_id = user_stores[0]["id"]  # Force to their only store
+    elif store_id:
+        # Admin/Manager: verify access
         store = get_store_by_id(DB_PATH, store_id, user_id)
         if not store:
             raise HTTPException(status_code=403, detail="无权访问该门店")
@@ -607,17 +654,23 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
     save_message("user", req.message, req.session_id, user_id, store_id)
     history = get_conversation_history(req.session_id, limit=10, user_id=user_id, store_id=store_id)
 
-    # 注入门店上下文
+    # 注入门店上下文 + 角色上下文
     store_context = ""
+    role_context = f"\n\n## 当前角色\n{ROLES.get(role, {}).get('label', role)}（{role}）"
     if store_id:
         store_info = get_store_by_id(DB_PATH, store_id, user_id)
         if store_info:
             store_context = f"\n\n## 当前门店\n名称: {store_info['name']}\n地址: {store_info.get('address', '未知')}\n区域: {store_info.get('district', '未知')}"
+    # Store owner: add permission boundary
+    if role == "store_owner":
+        role_context += "\n⚠️ 你是分店店主，仅能查看本店数据。不可查询竞品全局数据、不可查询其他门店数据、不可使用选址/建店/品牌管理功能。"
+
+    full_context = role_context + store_context
 
     async def stream_response():
         full_reply = ""
         try:
-            async for chunk in agent_loop(req.message, history, config, store_context=store_context):
+            async for chunk in agent_loop(req.message, history, config, store_context=full_context):
                 full_reply += chunk
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
             save_message("assistant", full_reply, req.session_id, user_id, store_id)
