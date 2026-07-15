@@ -184,6 +184,7 @@ def init_db():
         status TEXT DEFAULT 'pending',
         result_json TEXT,
         error_message TEXT,
+        retry_count INTEGER DEFAULT 0,
         uploaded_at REAL,
         analyzed_at REAL,
         FOREIGN KEY (task_id) REFERENCES collect_tasks(id),
@@ -220,6 +221,24 @@ def init_db():
         is_active INTEGER DEFAULT 1,
         created_at REAL
     )""")
+
+    # 操作审计日志
+    c.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT,
+        username TEXT,
+        role TEXT,
+        action TEXT NOT NULL,
+        resource_type TEXT,
+        resource_id TEXT,
+        store_id TEXT,
+        details_json TEXT,
+        ip_address TEXT,
+        result TEXT DEFAULT 'success',
+        created_at REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_audit_user_time ON audit_logs(user_id, created_at)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)")
 
     conn.commit()
     conn.close()
@@ -440,6 +459,8 @@ async def login(req: LoginRequest):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
 
     token = create_session(DB_PATH, user["id"])
+    log_audit({"user_id": user["id"], "username": user["username"], "role": user["role"]},
+              "login", resource_type="session", resource_id=token[:8], result="success")
     return {
         "ok": True,
         "token": token,
@@ -458,7 +479,6 @@ async def logout(request: Request):
     if token:
         invalidate_session(DB_PATH, token)
     return {"ok": True, "message": "已登出"}
-
 @app.get("/api/auth/me")
 async def me(user: dict = Depends(require_auth)):
     """获取当前用户信息"""
@@ -653,6 +673,8 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
 
     save_message("user", req.message, req.session_id, user_id, store_id)
     history = get_conversation_history(req.session_id, limit=10, user_id=user_id, store_id=store_id)
+    log_audit(user, "chat", resource_type="conversation", resource_id=req.session_id,
+              store_id=store_id, details={"message": req.message[:200]})
 
     # 注入门店上下文 + 角色上下文
     store_context = ""
@@ -977,7 +999,7 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
     db_exec(
         """INSERT INTO collect_uploads
            (id, task_id, task_item_id, uploaded_by, filename, file_path, file_size, status, uploaded_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'analyzing', ?)""",
         (upload_id, task_id, str(task_item_id) if task_item_id else None,
          user["user_id"], video_file.filename or safe_name, str(file_path), size, now)
     )
@@ -989,14 +1011,174 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
     # 更新任务状态
     db_exec("UPDATE collect_tasks SET status='in_progress', updated_at=? WHERE id=?", (now, task_id))
 
+    # 异步触发 AI 视频分析
+    asyncio.create_task(analyze_upload_video(upload_id, str(file_path), upload["product_name"] if (upload := db_query(
+        "SELECT ti.product_name FROM collect_uploads u LEFT JOIN collect_task_items ti ON u.task_item_id=ti.id WHERE u.id=?",
+        (upload_id,), fetch="one"
+    )) else None))
+
     return {
         "ok": True,
         "upload_id": upload_id,
         "filename": video_file.filename or safe_name,
         "file_size": size,
-        "status": "pending",
-        "message": "上传成功，等待AI分析"
+        "status": "analyzing",
+        "message": "上传成功，AI分析已自动启动"
     }
+
+
+# ===== AI 视频分析异步任务 =====
+
+async def analyze_upload_video(upload_id: str, file_path: str, product_name: str = None):
+    """后台异步执行视频分析：抽帧 → OCR → 结构提取（含失败重试 D2-4）"""
+    import subprocess, sys
+    MAX_RETRY = 2  # 最多重试 2 次（共 3 次尝试）
+    attempt = 0
+    last_error = ""
+    while attempt <= MAX_RETRY:
+        attempt += 1
+        try:
+            # Step 1: 尝试运行 video_pipeline.py 抽帧+OCR
+            pipeline_script = str(SCRIPTS_DIR / "video_pipeline.py")
+            cmd = [sys.executable, pipeline_script, file_path]
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=180)
+            stdout_text = stdout.decode('utf-8', errors='replace')[-4000:]
+            stderr_text = stderr.decode('utf-8', errors='replace')[-1000:]
+
+            if proc.returncode == 0:
+                # Pipeline 成功
+                result_json = json.dumps({
+                    "method": "video_pipeline",
+                    "success": True,
+                    "stdout": stdout_text[:3000],
+                    "product_name": product_name,
+                }, ensure_ascii=False)
+                db_exec(
+                    "UPDATE collect_uploads SET status='done', result_json=?, analyzed_at=?, retry_count=? WHERE id=?",
+                    (result_json, time.time(), attempt, upload_id)
+                )
+                return
+            else:
+                # Pipeline 失败，记录错误，进入重试
+                last_error = f"Pipeline exit code {proc.returncode}: {stderr_text[:500]}"
+                print(f"[视频分析] upload={upload_id} 第{attempt}次失败: {last_error[:200]}")
+        except asyncio.TimeoutError:
+            last_error = "视频分析超时（180秒）"
+            print(f"[视频分析] upload={upload_id} 第{attempt}次超时")
+        except Exception as e:
+            last_error = f"分析异常: {str(e)[:500]}"
+            print(f"[视频分析] upload={upload_id} 第{attempt}次异常: {str(e)[:200]}")
+
+        # 标记重试中（ui 可显示），稍后重试
+        if attempt <= MAX_RETRY:
+            db_exec(
+                "UPDATE collect_uploads SET status='retrying', retry_count=?, error_message=? WHERE id=?",
+                (attempt, f"第{attempt}次失败，准备重试: {last_error[:300]}", upload_id)
+            )
+            await asyncio.sleep(5)  # 退避 5 秒
+
+    # 所有重试耗尽，标记最终失败
+    db_exec(
+        "UPDATE collect_uploads SET status='failed', error_message=?, analyzed_at=? WHERE id=?",
+        (last_error[:500], time.time(), upload_id)
+    )
+
+
+@app.post("/api/uploads/{upload_id}/reprocess")
+async def reprocess_upload(upload_id: str, user: dict = Depends(require_role("manager"))):
+    """手动触发重新分析视频（manager/admin）"""
+    upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
+    if not upload:
+        raise HTTPException(status_code=404, detail="上传记录不存在")
+    db_exec("UPDATE collect_uploads SET status='analyzing', error_message=NULL, result_json=NULL WHERE id=?", (upload_id,))
+    asyncio.create_task(analyze_upload_video(upload_id, upload["file_path"]))
+    log_audit(user, "reprocess", resource_type="upload", resource_id=upload_id, store_id=upload.get("task_id"))
+    return {"ok": True, "message": "重新分析已启动", "upload_id": upload_id}
+
+
+@app.get("/api/uploads/{upload_id}/review")
+async def get_upload_review(upload_id: str, user: dict = Depends(require_role("manager"))):
+    """获取上传记录的复核信息（仅 manager/admin）"""
+    upload = db_query(
+        """SELECT u.*, ti.product_name, ti.product_spec,
+                  usr.username as uploader_name
+           FROM collect_uploads u
+           LEFT JOIN collect_task_items ti ON u.task_item_id = ti.id
+           LEFT JOIN users usr ON u.uploaded_by = usr.id
+           WHERE u.id=?""",
+        (upload_id,), fetch="one"
+    )
+    if not upload:
+        raise HTTPException(status_code=404, detail="上传记录不存在")
+    # 解析result_json
+    parsed = None
+    if upload.get("result_json"):
+        try:
+            parsed = json.loads(upload["result_json"])
+        except:
+            parsed = {"raw": upload["result_json"]}
+    return {
+        "upload": upload,
+        "parsed": parsed,
+        "review_status": upload.get("status"),
+        "error_message": upload.get("error_message"),
+    }
+
+
+@app.post("/api/uploads/{upload_id}/confirm")
+async def confirm_upload_review(upload_id: str, req: dict, user: dict = Depends(require_role("manager"))):
+    """确认/人工修正视频解析结果（manager/admin）"""
+    upload = db_query("SELECT * FROM collect_uploads WHERE id=?", (upload_id,), fetch="one")
+    if not upload:
+        raise HTTPException(status_code=404, detail="上传记录不存在")
+    # req: {correction: {product_name, product_spec, captured_price, notes}, confirm: bool}
+    confirm = req.get("confirm", True)
+    correction = req.get("correction", {})
+    if not correction and confirm:
+        # 仅确认，不修改
+        db_exec(
+            "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
+            (upload.get("result_json"), time.time(), upload_id)
+        )
+        log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
+                  details={"method": "ai_result_accepted"})
+        return {"ok": True, "message": "已确认（接受AI结果）", "upload_id": upload_id}
+    # 人工修正 - 存储修正后的结果
+    corrected = {
+        "method": "human_corrected",
+        "corrected_by": user.get("username"),
+        "corrected_at": time.time(),
+        "original_result": upload.get("result_json"),
+        **correction,
+    }
+    db_exec(
+        "UPDATE collect_uploads SET status='confirmed', result_json=?, analyzed_at=? WHERE id=?",
+        (json.dumps(corrected, ensure_ascii=False), time.time(), upload_id)
+    )
+    log_audit(user, "confirm", resource_type="upload", resource_id=upload_id,
+              details={"method": "human_corrected", "correction": correction})
+    return {"ok": True, "message": "已保存人工修正", "upload_id": upload_id}
+
+
+@app.get("/api/uploads/pending")
+async def list_pending_uploads(user: dict = Depends(require_role("manager"))):
+    """列出待复核的上传（manager/admin）"""
+    rows = db_query(
+        """SELECT u.*, ti.product_name, ti.product_spec,
+                  usr.username as uploader_name, c.title as task_name, s.name as store_name
+           FROM collect_uploads u
+           JOIN collect_tasks c ON u.task_id = c.id
+           LEFT JOIN collect_task_items ti ON u.task_item_id = ti.id
+           LEFT JOIN users usr ON u.uploaded_by = usr.id
+           LEFT JOIN stores s ON c.store_id = s.id
+           WHERE u.status IN ('done', 'failed', 'analyzing', 'retrying')
+           ORDER BY u.uploaded_at DESC LIMIT 100""",
+        fetch="all"
+    )
+    return {"uploads": rows, "count": len(rows)}
 
 
 # ===== 上传记录 & 分析状态 =====
@@ -1172,11 +1354,70 @@ def migrate_default_user():
 migrate_default_user()
 
 
+# ===== 操作审计 (D1-5) =====
+
+def log_audit(user: dict, action: str, resource_type: str = None, resource_id: str = None,
+              store_id: str = None, details: dict = None, result: str = "success", ip: str = None):
+    """记录一条审计日志"""
+    try:
+        log_id = str(uuid.uuid4())
+        db_exec(
+            """INSERT INTO audit_logs
+               (id, user_id, username, role, action, resource_type, resource_id, store_id,
+                details_json, ip_address, result, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (log_id, user.get("user_id"), user.get("username"), user.get("role"),
+             action, resource_type, resource_id, store_id,
+             json.dumps(details, ensure_ascii=False) if details else None,
+             ip, result, time.time())
+        )
+    except Exception as e:
+        print(f"[AUDIT] failed to log: {e}")
+
+
+@app.get("/api/audit/logs")
+async def list_audit_logs(
+    user_id: str = None, action: str = None, resource_type: str = None,
+    limit: int = 100, offset: int = 0,
+    user: dict = Depends(require_role("admin"))
+):
+    """查询审计日志（仅 admin）"""
+    sql = "SELECT * FROM audit_logs WHERE 1=1"
+    params = []
+    if user_id:
+        sql += " AND user_id=?"
+        params.append(user_id)
+    if action:
+        sql += " AND action=?"
+        params.append(action)
+    if resource_type:
+        sql += " AND resource_type=?"
+        params.append(resource_type)
+    sql += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+    rows = db_query(sql, tuple(params), fetch="all")
+    return {"logs": rows, "count": len(rows)}
+
+
+@app.get("/api/audit/stats")
+async def audit_stats(user: dict = Depends(require_role("admin"))):
+    """审计统计（仅 admin）"""
+    rows = db_query(
+        """SELECT action, COUNT(*) as count
+           FROM audit_logs
+           WHERE created_at > ?
+           GROUP BY action
+           ORDER BY count DESC""",
+        (time.time() - 86400 * 7,), fetch="all"
+    )
+    return {"stats_7d": rows}
+
+
 # ===== Main =====
 if __name__ == "__main__":
     import uvicorn
     host = config.get("server", {}).get("host", "127.0.0.1")
     port = int(config.get("server", {}).get("port", "8420"))
     url = f"http://{host}:{port}"
-    print(f"鹿小仓 v0.4 启动中... {url}")
+    print(f"鹿小仓 v0.5.1 启动中... {url}")
     uvicorn.run(app, host=host, port=port, log_level="info")

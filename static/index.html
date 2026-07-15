@@ -834,6 +834,32 @@ body {
   </div>
 </div>
 
+<!-- 上传复核模态框 -->
+<div class="modal-overlay" id="uploadReviewModal">
+  <div class="modal" style="width:600px;max-height:85vh;overflow-y:auto;">
+    <h2>🔍 上传复核</h2>
+    <div id="uploadReviewInfo" style="font-size:13px;line-height:1.8;"></div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <h3 style="font-size:14px;margin-bottom:8px;">📝 AI 解析结果</h3>
+      <pre id="uploadParsedJson" style="background:var(--bg-2);padding:8px;border-radius:4px;font-size:11px;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></pre>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);">
+      <h3 style="font-size:14px;margin-bottom:8px;">✏️ 人工修正（可选）</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+        <div><label>商品名称</label><input id="rev-product-name" type="text" style="width:100%;padding:4px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);border-radius:3px;"></div>
+        <div><label>规格</label><input id="rev-product-spec" type="text" style="width:100%;padding:4px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);border-radius:3px;"></div>
+        <div><label>拍摄价格（元）</label><input id="rev-captured-price" type="number" step="0.01" style="width:100%;padding:4px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);border-radius:3px;"></div>
+        <div><label>备注</label><input id="rev-notes" type="text" style="width:100%;padding:4px;background:var(--bg-2);color:var(--text);border:1px solid var(--border);border-radius:3px;"></div>
+      </div>
+    </div>
+    <div class="modal-actions" style="margin-top:16px;">
+      <button class="modal-btn" onclick="reprocessUpload()">🔄 重新分析</button>
+      <button class="modal-btn" onclick="closeUploadReview()">取消</button>
+      <button class="modal-btn primary" onclick="confirmUploadReview()">✔️ 确认提交</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Auth State =====
 let token = localStorage.getItem('lxc_token') || '';
@@ -1524,11 +1550,13 @@ async function openTaskDetail(taskId) {
     ).join('') || '<span style="color:var(--text-faint);">无商品清单</span>';
     // Uploads
     const uploadsDiv = document.getElementById('taskUploadsList');
-    const ulStatusMap = {pending:'⏳排队', analyzing:'🔬分析中', done:'✅完成', failed:'❌失败'};
+    const ulStatusMap = {pending:'⏳排队', analyzing:'🔬分析中', retrying:'🔁重试中', done:'✅完成', failed:'❌失败', confirmed:'✔️已复核'};
+    const isReviewer = (currentUser.role === 'admin' || currentUser.role === 'manager');
     uploadsDiv.innerHTML = data.uploads.map(u =>
-      `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:11px;">
-        ${ulStatusMap[u.status]||u.status} ${u.product_name||''} ${u.filename}
+      `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:11px;">
+        ${ulStatusMap[u.status]||u.status} ${u.product_name||''} ${u.filename||''}
         <span style="color:var(--text-faint);">${new Date(u.uploaded_at*1000).toLocaleString('zh-CN')} ${(u.file_size/1024/1024).toFixed(1)}MB</span>
+        ${isReviewer && (u.status==='done'||u.status==='failed') ? `<button onclick="openUploadReview('${u.id}')" style="margin-left:8px;padding:2px 6px;background:var(--accent);color:#000;border:none;border-radius:3px;cursor:pointer;font-size:10px;">复核</button>` : ''}
       </div>`
     ).join('') || '<span style="color:var(--text-faint);">暂无上传记录</span>';
   } catch (e) {
@@ -1537,34 +1565,158 @@ async function openTaskDetail(taskId) {
 }
 function closeTaskDetail() { document.getElementById('taskDetailModal').classList.remove('show'); }
 
+// ===== 上传复核 (D3-1) =====
+let reviewUploadId = null;
+async function openUploadReview(uploadId) {
+  reviewUploadId = uploadId;
+  const d = await api('/api/uploads/' + uploadId + '/review');
+  const u = d.upload, p = d.parsed || {};
+  let html = `<div><b>任务项:</b> ${u.product_name||''} ${u.product_spec||''}</div>`;
+  html += `<div><b>上传者:</b> ${u.uploader_name||'未知'} · <b>时间:</b> ${new Date(u.uploaded_at*1000).toLocaleString('zh-CN')}</div>`;
+  html += `<div><b>状态:</b> ${u.status}${u.error_message? ' · <span style="color:var(--danger)">'+u.error_message+'</span>':''}</div>`;
+  // 预填
+  document.getElementById('rev-product-name').value = p.product_name||u.product_name||'';
+  document.getElementById('rev-product-spec').value = p.product_spec||u.product_spec||'';
+  document.getElementById('rev-captured-price').value = p.captured_price||'';
+  document.getElementById('rev-notes').value = '';
+  document.getElementById('uploadReviewInfo').innerHTML = html;
+  document.getElementById('uploadParsedJson').textContent = JSON.stringify(p, null, 2) || '(无解析结果)';
+  document.getElementById('uploadReviewModal').classList.add('show');
+}
+function closeUploadReview() { document.getElementById('uploadReviewModal').classList.remove('show'); }
+async function reprocessUpload() {
+  if (!reviewUploadId) return;
+  await api('/api/uploads/' + reviewUploadId + '/reprocess', 'POST');
+  closeUploadReview();
+  alert('已重新触发分析');
+}
+async function confirmUploadReview() {
+  if (!reviewUploadId) return;
+  const correction = {
+    product_name: document.getElementById('rev-product-name').value,
+    product_spec: document.getElementById('rev-product-spec').value,
+    captured_price: parseFloat(document.getElementById('rev-captured-price').value) || null,
+    notes: document.getElementById('rev-notes').value,
+  };
+  await api('/api/uploads/' + reviewUploadId + '/confirm', 'POST', {confirm: true, correction});
+  closeUploadReview();
+  alert('已确认提交');
+  if (currentTaskId) loadTaskDetail(currentTaskId);
+}
+
 async function doUpload() {
   const fileInput = document.getElementById('uploadFileInput');
   const file = fileInput.files[0];
-  if (!file) { alert('请选择视频文件'); return; }
-  if (file.size > 50*1024*1024) { alert('文件不能超过50MB'); return; }
   const statusEl = document.getElementById('uploadStatus');
-  statusEl.textContent = '上传中...';
+  if (!file) { statusEl.textContent = '⚠️ 请选择视频文件'; statusEl.style.color = 'var(--warn)'; return; }
+  // 校验文件类型
+  const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm', 'video/avi'];
+  const allowedExts = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowedExts.includes(ext) && !allowedTypes.includes(file.type)) {
+    statusEl.textContent = `⚠️ 不支持的文件格式（${ext}），请上传MP4/MOV/AVI视频`;
+    statusEl.style.color = 'var(--warn)';
+    return;
+  }
+  // 校验文件大小
+  if (file.size > 50*1024*1024) { statusEl.textContent = '⚠️ 文件超过50MB限制'; statusEl.style.color = 'var(--warn)'; return; }
+  if (file.size < 1024) { statusEl.textContent = '⚠️ 文件太小，可能是空文件'; statusEl.style.color = 'var(--warn)'; return; }
+  // 校验时长（通过MediaElement）
+  statusEl.textContent = '⏳ 校验视频...';
+  statusEl.style.color = 'var(--accent)';
+  try {
+    const duration = await checkVideoDuration(file);
+    if (duration > 300) {
+      statusEl.textContent = `⚠️ 视频时长 ${Math.round(duration)}秒，超过5分钟限制，请裁剪后再上传`;
+      statusEl.style.color = 'var(--warn)';
+      return;
+    }
+    if (duration < 1) {
+      statusEl.textContent = '⚠️ 视频太短（<1秒），请检查文件';
+      statusEl.style.color = 'var(--warn)';
+      return;
+    }
+  } catch (e) {
+    // 浏览器不支持读取时长，跳过此校验
+  }
+  // 开始上传
+  statusEl.textContent = '📤 上传中 0%...';
+  statusEl.style.color = 'var(--accent)';
   const formData = new FormData();
   formData.append('video_file', file);
   try {
-    const headers = {};
-    if (token) headers['Authorization'] = 'Bearer ' + token;
-    const resp = await fetch('/api/tasks/' + currentTaskId + '/upload', { method: 'POST', body: formData, headers });
-    const data = await resp.json();
-    if (data.ok) {
-      statusEl.textContent = '✅ 上传成功！';
-      statusEl.style.color = 'var(--success)';
-      fileInput.value = '';
-      // Refresh detail
-      setTimeout(() => openTaskDetail(currentTaskId), 500);
-    } else {
-      statusEl.textContent = '❌ ' + (data.detail || '上传失败');
-      statusEl.style.color = 'var(--danger)';
-    }
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = function(e) {
+      if (e.lengthComputable) {
+        const pct = Math.round(e.loaded / e.total * 100);
+        statusEl.textContent = `📤 上传中 ${pct}%...`;
+      }
+    };
+    await new Promise((resolve, reject) => {
+      xhr.open('POST', '/api/tasks/' + currentTaskId + '/upload');
+      if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+      xhr.onload = function() {
+        try {
+          const data = JSON.parse(xhr.responseText);
+          if (data.ok) {
+            statusEl.textContent = '✅ 上传成功！AI解析中...';
+            statusEl.style.color = 'var(--success)';
+            fileInput.value = '';
+            resolve(data);
+          } else {
+            statusEl.textContent = '❌ ' + (data.detail || '上传失败');
+            statusEl.style.color = 'var(--danger)';
+            reject(new Error(data.detail));
+          }
+        } catch (e) { reject(e); }
+      };
+      xhr.onerror = function() {
+        statusEl.textContent = '❌ 网络错误，请重试';
+        statusEl.style.color = 'var(--danger)';
+        reject(new Error('网络错误'));
+      };
+      xhr.send(formData);
+    });
+    // Poll for analysis result
+    statusEl.textContent = '✅ 上传成功！🔬 AI解析中...';
+    statusEl.style.color = 'var(--accent)';
+    let pollCount = 0;
+    const pollInterval = setInterval(async () => {
+      pollCount++;
+      if (pollCount > 60) { clearInterval(pollInterval); statusEl.textContent = '⏰ 解析超时，请手动刷新'; return; }
+      try {
+        const r = await api('/api/tasks/' + currentTaskId + '/uploads');
+        const d = await r.json();
+        const last = d.uploads && d.uploads[0];
+        if (last) {
+          if (last.status === 'done') {
+            clearInterval(pollInterval);
+            statusEl.textContent = '✅ 解析完成！';
+            statusEl.style.color = 'var(--success)';
+            openTaskDetail(currentTaskId);
+          } else if (last.status === 'failed') {
+            clearInterval(pollInterval);
+            statusEl.textContent = '❌ 解析失败：' + (last.error_msg || '未知错误') + ' 请重新上传';
+            statusEl.style.color = 'var(--danger)';
+          } else if (last.status === 'analyzing') {
+            statusEl.textContent = `✅ 上传成功！🔬 AI解析中 (${pollCount*5}s)...`;
+          }
+        }
+      } catch (e) {}
+    }, 5000);
   } catch (e) {
-    statusEl.textContent = '❌ ' + e.message;
-    statusEl.style.color = 'var(--danger)';
+    // 已在上方处理
   }
+}
+
+function checkVideoDuration(file) {
+  return new Promise((resolve, reject) => {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.onloadedmetadata = function() { resolve(video.duration); URL.revokeObjectURL(video.src); };
+    video.onerror = function() { reject(new Error('无法读取视频信息')); };
+    video.src = URL.createObjectURL(file);
+  });
 }
 
 // ===== Init =====
