@@ -995,10 +995,20 @@ async def upload_video(task_id: str, request: Request, user: dict = Depends(requ
         if not any(s["id"] == task["store_id"] for s in user_stores):
             raise HTTPException(status_code=403, detail="无权上传到该任务")
 
-    # D2-2: 截止日期校验
+    # D2-2: 截止日期校验（兼容 ISO 字符串或时间戳，避免 float() 解析 ISO 报错 500）
     if task.get("deadline"):
-        dl = float(task["deadline"])
-        if time.time() > dl:
+        dl_raw = task["deadline"]
+        try:
+            if isinstance(dl_raw, (int, float)):
+                dl = float(dl_raw)
+            else:
+                dl = datetime.fromisoformat(str(dl_raw).strip().replace("Z", "+00:00")).timestamp()
+        except Exception:
+            try:
+                dl = float(str(dl_raw).strip())
+            except Exception:
+                dl = None
+        if dl is not None and time.time() > dl:
             raise HTTPException(status_code=400, detail="该任务已过截止日期，无法上传")
 
     try:
