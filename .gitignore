@@ -41,3 +41,4 @@ deploy*.py
 # Credentials
 CREDENTIALS.md
 credentials.json
+uploads/
