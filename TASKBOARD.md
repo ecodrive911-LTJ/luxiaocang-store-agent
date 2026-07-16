@@ -36,7 +36,7 @@
 | D2-09 | 门店画像&长期记忆 | `a23c4a2` | 2026-07-16 | memory.py + store_profiles/agent_memory两表 + 对话前召回注入system prompt + 对话后流式LLM抽取写回 + /api/memory/summary端点；线上验证V2-08/V2-09通过(一次诊断对话写回4画像+4记忆) |
 | D2-08 | 用户偏好学习 | `281d453` | 2026-07-16 | query_stats表 + classify_query(确定性关键词分类,不调LLM) + record_query(对话时记录) + get_top_preferences + build_preference_context(连续5次同类型后注入system prompt) + /api/memory/preferences端点；线上验证V2-07通过 |
 | 建店引擎 | 建店规划引擎 | `bc5834a` | 2026-07-16 | build_store.py(面积→品类权重→SKU推算→货架方案,纯逻辑启发式,默认参数集中可校准) + /api/build_store/plan端点 + agent_loop build_store_plan工具；自测(50/100/200㎡+面积=0异常)全过 + 线上验证(area=100返回完整方案/area=0返回400)通过 |
-| D2-11 | 内部数据采集接入(路线A) | `pending` | 2026-07-16 | ingestion.py + raw_orders/raw_reviews/raw_items/import_batches四表 + 灵活中英文列映射解析(美团原生导出) + 真实GMV/毛利/动销率聚合 + 手动Excel/CSV导入端点 + 导入历史 + 模板下载 + 前端数据导入视图；线上验证通过(合成美团xlsx→4行入库→看板data_mode切real,GMV22/订单3/AOV7.33) |
+| D2-11 | 内部数据采集接入(路线A) | `c2ec8bf` | 2026-07-16 | ingestion.py + raw_orders/raw_reviews/raw_items/import_batches四表 + 灵活中英文列映射解析(美团原生导出) + 真实GMV/毛利/动销率聚合 + 手动Excel/CSV导入端点 + 导入历史 + 模板下载 + 前端数据导入视图；线上验证通过(合成美团xlsx→4行入库→看板data_mode切real,GMV22/订单3/AOV7.33) |
 
 ---
 
