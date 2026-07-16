@@ -72,6 +72,15 @@ def _get_alert_count(db_path: str, store_id: str) -> int:
         return 0
 
 
+def _get_real_summary(db_path: str, store_id: str) -> dict:
+    """D2-11: 从 raw_orders 聚合真实经营指标（无数据时返回 has_real=False）"""
+    try:
+        from ingestion import get_real_sales_summary
+        return get_real_sales_summary(db_path, store_id)
+    except Exception:
+        return {"has_real": False}
+
+
 def compute_store_dashboard(db_path: str, store_id: str) -> dict:
     """单店看板数据"""
     cache_key = f"store_dash:{store_id}"
@@ -107,6 +116,19 @@ def compute_store_dashboard(db_path: str, store_id: str) -> dict:
         "traffic_count": traffic_flag_count,
         "alert_count": _get_alert_count(db_path, store_id),
     }
+
+    # ---- D2-11: 真实经营数据（店主导入美团/收银流水后覆盖理论值）----
+    real = _get_real_summary(db_path, store_id)
+    if real["has_real"]:
+        kpi["data_mode"] = "real"
+        kpi["real_gmv"] = real["real_gmv"]
+        kpi["real_gross_profit"] = real["real_gross_profit"]
+        kpi["order_count"] = real["order_count"]
+        kpi["avg_order_value"] = real["avg_order_value"]
+        kpi["sell_through_rate"] = real["sell_through_rate"]
+        kpi["matched_gmv"] = real["matched_gmv"]
+    else:
+        kpi["data_mode"] = "theoretical"
 
     # ---- 品类结构 ----
     cat_counts = defaultdict(int)
@@ -180,6 +202,7 @@ def compute_store_dashboard(db_path: str, store_id: str) -> dict:
         "store_id": store_id,
         "store_name": store_name,
         "kpi": kpi,
+        "real_sales": real,
         "charts": {
             "category_pie": category_pie,
             "price_band": {

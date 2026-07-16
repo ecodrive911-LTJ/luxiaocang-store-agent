@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
 from memory import (build_memory_context, extract_and_save_memory, get_memory_summary,
                    build_preference_context, record_query, get_top_preferences)
+from ingestion import parse_and_import, get_real_sales_summary, get_import_history, make_template_csv
 from product_analysis import (
     classify_products as pa_classify,
     category_gap_analysis as pa_category_gap,
@@ -318,6 +319,57 @@ def init_db():
         UNIQUE(store_id, category, topic)
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_query_store ON query_stats(store_id, count)")
+
+    # D2-11: 内部数据采集接入层（raw_data 数据湖）—— 店主从美团/饿了么/收银导出后手动导入
+    c.execute("""CREATE TABLE IF NOT EXISTS raw_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        order_id TEXT,
+        order_time TEXT,
+        product_name TEXT,
+        quantity REAL,
+        unit_price REAL,
+        amount REAL,
+        category TEXT,
+        batch_id TEXT,
+        imported_at REAL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS raw_reviews (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        review_id TEXT,
+        review_time TEXT,
+        rating REAL,
+        content TEXT,
+        batch_id TEXT,
+        imported_at REAL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS raw_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        item_name TEXT,
+        on_sale INTEGER DEFAULT 1,
+        price REAL,
+        category TEXT,
+        batch_id TEXT,
+        imported_at REAL
+    )""")
+    c.execute("""CREATE TABLE IF NOT EXISTS import_batches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id TEXT UNIQUE NOT NULL,
+        store_id TEXT NOT NULL,
+        data_type TEXT NOT NULL,
+        filename TEXT,
+        row_count INTEGER,
+        status TEXT,
+        note TEXT,
+        imported_by TEXT,
+        imported_at REAL
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_raw_orders_store_time ON raw_orders(store_id, order_time)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_raw_reviews_store ON raw_reviews(store_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_raw_items_store ON raw_items(store_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_import_batches_store ON import_batches(store_id, imported_at)")
 
     conn.commit()
     conn.close()
@@ -977,6 +1029,88 @@ async def memory_preferences(store_id: str = None, threshold: int = 5,
         raise HTTPException(status_code=403, detail="无权访问该门店")
     prefs = get_top_preferences(DB_PATH, store_id, threshold)
     return {"store_id": store_id, "threshold": threshold, "preferences": prefs}
+
+
+# ===== D2-11 内部数据采集接入（手动导入）=====
+
+@app.post("/api/data/import")
+async def data_import(request: Request, user: dict = Depends(require_auth)):
+    """店主从美团/饿了么/收银后台导出 Excel/CSV 后手动导入 (路线A)。
+    - Content-Type: multipart/form-data
+    - 字段: file(必需), data_type(orders|reviews|items), store_id(可选, store_owner强制本店)
+    """
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    owned = get_user_stores(DB_PATH, user_id)
+    if not owned:
+        raise HTTPException(status_code=403, detail="未绑定门店")
+
+    try:
+        form = await request.form()
+    except Exception:
+        raise HTTPException(status_code=400, detail="请使用 multipart/form-data 格式上传")
+
+    file = form.get("file")
+    data_type = (form.get("data_type") or "").strip()
+    req_store = (form.get("store_id") or "").strip()
+    if data_type not in ("orders", "reviews", "items"):
+        raise HTTPException(status_code=400, detail="data_type 必须是 orders/reviews/items")
+    if not file:
+        raise HTTPException(status_code=400, detail="缺少 file 字段")
+
+    # 门店权限：store_owner 锁定本店
+    if role == "store_owner":
+        store_id = owned[0]["id"]
+    else:
+        store_id = req_store or (owned[0]["id"] if owned else None)
+        if store_id and not get_store_by_id(DB_PATH, store_id, user_id):
+            raise HTTPException(status_code=403, detail="无权访问该门店")
+    if not store_id:
+        raise HTTPException(status_code=400, detail="请指定 store_id")
+
+    filename = getattr(file, "filename", "upload") or "upload"
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="文件为空")
+
+    try:
+        result = parse_and_import(DB_PATH, store_id, data_type, filename, content, user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"解析失败: {str(e)}")
+
+    return {"ok": True, "store_id": store_id, **result}
+
+
+@app.get("/api/data/imports")
+async def data_imports(store_id: str = None, user: dict = Depends(require_auth)):
+    role = user.get("role", "store_owner")
+    user_id = user["user_id"]
+    owned = get_user_stores(DB_PATH, user_id)
+    if not store_id:
+        store_id = owned[0]["id"] if owned else None
+    if not store_id:
+        raise HTTPException(status_code=403, detail="未绑定门店")
+    if role == "store_owner":
+        if not any(s["id"] == store_id for s in owned):
+            raise HTTPException(status_code=403, detail="无权访问该门店")
+    elif not get_store_by_id(DB_PATH, store_id, user_id):
+        raise HTTPException(status_code=403, detail="无权访问该门店")
+    return {"store_id": store_id, "history": get_import_history(DB_PATH, store_id)}
+
+
+@app.get("/api/data/template")
+async def data_template(data_type: str = "orders", user: dict = Depends(require_auth)):
+    if data_type not in ("orders", "reviews", "items"):
+        raise HTTPException(status_code=400, detail="data_type 必须是 orders/reviews/items")
+    from fastapi.responses import Response
+    csv_text = make_template_csv(data_type)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={data_type}_template.csv"},
+    )
 
 
 @app.get("/api/conversations")
