@@ -1,0 +1,3 @@
+put C:\Users\13522\diancanmou\app.py /opt/luxiaocang/app.py
+put C:\Users\13522\diancanmou\static\index.html /opt/luxiaocang/static/index.html
+bye

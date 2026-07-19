@@ -18,6 +18,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
+from pricing import handle_pricing, build_pricing_anchor
+from profit_tools import set_current_store
 from memory import (build_memory_context, extract_and_save_memory, get_memory_summary,
                    build_preference_context, record_query, get_top_preferences)
 from ingestion import parse_and_import, get_real_sales_summary, get_import_history, make_template_csv
@@ -370,6 +372,43 @@ def init_db():
     c.execute("CREATE INDEX IF NOT EXISTS idx_raw_reviews_store ON raw_reviews(store_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_raw_items_store ON raw_items(store_id)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_import_batches_store ON import_batches(store_id, imported_at)")
+
+    # D-pricing: 门店硬成本（变量池）——支撑 store-pricing-calculator skill 的跨轮记忆
+    c.execute("""CREATE TABLE IF NOT EXISTS store_variable_cost (
+        param_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        effective_date TEXT NOT NULL,
+        delivery_cost_per_order REAL,
+        packaging_cost_per_order REAL,
+        spoilage_rate REAL,
+        target_gross_margin REAL,
+        gross_margin_rate REAL,
+        daily_traffic_avg REAL,
+        total_fixed_cost REAL,
+        target_net_profit REAL,
+        created_at REAL DEFAULT (datetime('now'))
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_svc_store ON store_variable_cost(store_id, effective_date)")
+
+    # 动态盈利引擎：订单数据表（3天滚动累计）
+    c.execute("""CREATE TABLE IF NOT EXISTS profit_order_feed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT NOT NULL,
+        order_id TEXT NOT NULL,
+        total_revenue REAL NOT NULL,
+        total_cost REAL NOT NULL,
+        gross_profit REAL NOT NULL,
+        platform_commission REAL NOT NULL,
+        delivery_cost REAL NOT NULL,
+        fulfillment_cost REAL NOT NULL,
+        net_profit REAL NOT NULL,
+        distance_km REAL NOT NULL,
+        commission_rate REAL NOT NULL,
+        items_json TEXT,
+        created_at REAL NOT NULL,
+        FOREIGN KEY (store_id) REFERENCES stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pof_store_time ON profit_order_feed(store_id, created_at)")
 
     conn.commit()
     conn.close()
@@ -803,6 +842,12 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
             raise HTTPException(status_code=403, detail="无权访问该门店")
 
     save_message("user", req.message, req.session_id, user_id, store_id)
+
+    # ── D-pricing: 定价/盈利测算意图路由（命中则不走 LLM，直接出标准处方）──
+    pricing_reply, is_pricing = handle_pricing(req.message, store_id)
+    if is_pricing:
+        return _pricing_stream_response(pricing_reply, req, user_id, store_id)
+
     # D2-08: 记录本次咨询的问题类型+主题（高频偏好学习，确定性分类，不调LLM）
     if store_id:
         try:
@@ -835,7 +880,10 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
     # 记忆写回时携带门店名（避免 stream_response 内重复查询）
     store_name_for_memory = store_info["name"] if (store_id and store_info) else ""
 
-    full_context = role_context + store_context + alert_context + memory_context + preference_context
+    # ── D-pricing 核心支点：注入门店财务底座，让所有策略建议踩在真实盈亏数字上 ──
+    pricing_anchor = build_pricing_anchor(store_id) if store_id else ""
+
+    full_context = role_context + store_context + alert_context + memory_context + preference_context + pricing_anchor
 
     async def stream_response():
         full_reply = ""
@@ -868,6 +916,9 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
         # 用 create_task 启动，不受请求 cancel scope 影响（客户端断开也不会被取消）
         _bg = asyncio.create_task(_persist_turn())
 
+        # 注入门店上下文到盈利引擎工具
+        set_current_store(store_id)
+
         try:
             async for chunk in agent_loop(req.message, history, config, store_context=full_context):
                 full_reply += chunk
@@ -879,6 +930,18 @@ async def chat(req: ChatRequest, user: dict = Depends(require_auth)):
             _persist_done.set()
 
     return StreamingResponse(stream_response(), media_type="text/event-stream")
+
+
+def _pricing_stream_response(text: str, req: ChatRequest, user_id: str, store_id: str):
+    """定价意图命中时的流式响应：直接输出标准处方，不调 LLM、不抽记忆。"""
+    async def gen():
+        try:
+            save_message("assistant", text, req.session_id, user_id, store_id)
+        except Exception:
+            pass
+        yield f"data: {json.dumps({'content': text})}\n\n"
+        yield f"data: {json.dumps({'done': True})}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 def _get_alert_context(user: dict, store_id: str = None) -> str:
@@ -989,6 +1052,53 @@ async def list_tools():
             for t in TOOLS.values()
         ]
     }
+
+
+# ===== 动态盈利引擎：数据摄入端点 =====
+
+class OrderFeedItem(BaseModel):
+    name: str
+    quantity: int
+    price: float
+    cost: float
+
+class OrderFeedRequest(BaseModel):
+    store_id: str
+    order_id: str
+    items: list[OrderFeedItem]
+    distance_km: float
+    platform_commission_rate: float
+
+@app.post("/api/profit_engine/ingest")
+async def ingest_order_data(req: OrderFeedRequest, user: dict = Depends(require_auth)):
+    """外部系统被动喂入订单数据（被动接收，实时更新）
+    
+    用于：
+    - POS/ERP 系统实时推送订单
+    - 手工录入订单
+    - 其他系统对接
+    
+    数据写入 profit_order_feed 表，参与 3 天滚动累计
+    """
+    # 权限检查
+    user_stores = get_user_stores(DB_PATH, user["user_id"])
+    if user["role"] == "store_owner":
+        if not any(s["id"] == req.store_id for s in user_stores):
+            raise HTTPException(status_code=403, detail="无权操作该门店")
+    
+    # 调用 evaluate_order 工具（会自动写入 profit_order_feed 表）
+    try:
+        from profit_tools import evaluate_order
+        items_list = [{"sku_name": it.name, "sell_price": it.price, "purchase_cost": it.cost, "quantity": it.quantity} for it in req.items]
+        result = evaluate_order(
+            order_id=req.order_id,
+            items=items_list,
+            delivery_distance_km=req.distance_km,
+            platform_commission_rate=req.platform_commission_rate
+        )
+        return {"ok": True, "store_id": req.store_id, "order_id": req.order_id, "result": result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"数据摄入失败: {str(e)}")
 
 
 @app.get("/api/memory/summary")

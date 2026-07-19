@@ -1,0 +1,97 @@
+[
+  {
+    "name": "evaluate_order",
+    "description": "评估单笔订单的真实利润，识别亏损订单并给出建议",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "order_id": {
+          "type": "string",
+          "description": "订单ID"
+        },
+        "items": {
+          "type": "array",
+          "description": "订单商品列表",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"},
+              "quantity": {"type": "integer"},
+              "price": {"type": "number"},
+              "cost": {"type": "number"}
+            },
+            "required": ["name", "quantity", "price", "cost"]
+          }
+        },
+        "distance_km": {
+          "type": "number",
+          "description": "配送距离（公里）"
+        },
+        "platform_commission_rate": {
+          "type": "number",
+          "description": "平台佣金率（如0.18表示18%）"
+        }
+      },
+      "required": ["order_id", "items", "distance_km", "platform_commission_rate"]
+    }
+  },
+  {
+    "name": "get_store_dashboard",
+    "description": "获取门店经营大盘数据（3天累计）",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "store_id": {
+          "type": "string",
+          "description": "门店ID"
+        }
+      },
+      "required": []
+    }
+  },
+  {
+    "name": "simulate_price_change",
+    "description": "模拟商品调价对利润的影响",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "product_name": {
+          "type": "string",
+          "description": "商品名称"
+        },
+        "current_price": {
+          "type": "number",
+          "description": "当前价格"
+        },
+        "new_price": {
+          "type": "number",
+          "description": "新价格"
+        },
+        "cost": {
+          "type": "number",
+          "description": "成本"
+        },
+        "daily_volume": {
+          "type": "integer",
+          "description": "日均销量"
+        }
+      },
+      "required": ["product_name", "current_price", "new_price", "cost", "daily_volume"]
+    }
+  },
+  {
+    "name": "simulate_delivery_strategy",
+    "description": "模拟不同配送距离的起送价和利润结构",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "distances": {
+          "type": "array",
+          "description": "要模拟的距离列表（公里）",
+          "items": {"type": "number"}
+        }
+      },
+      "required": []
+    }
+  }
+]

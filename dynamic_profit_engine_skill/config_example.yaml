@@ -1,0 +1,55 @@
+# 动态盈利决策引擎配置示例
+
+# 引擎基础参数
+engine:
+  # 红线阈值
+  red_line_profit: 0  # 单笔订单利润低于此值视为红线（元）
+  red_line_rate: 0.15  # 红线订单占比超过此值触发预警（15%）
+  
+  # 保本参数
+  daily_fixed_cost: 1000.0  # 每日固定成本（元），包括房租、人工、水电等
+  
+  # 配送费计算
+  delivery:
+    base_fee: 5.0  # 基础配送费（元）
+    base_distance: 3.0  # 基础配送距离（公里）
+    extra_per_km: 1.5  # 超出部分每公里加收（元）
+
+# 数据输入配置
+data_input:
+  # 滚动累计周期（天）
+  rolling_period_days: 3
+  
+  # 外部数据输入接口（被动接收）
+  # 实际使用时，外部系统通过 HTTP POST 推送订单数据到 /api/profit_engine/ingest_order
+
+# 门店配置（每个门店一份）
+stores:
+  # 示例：鹿小仓广安店
+  guangan:
+    store_id: "guangan"
+    store_name: "鹿小仓广安店"
+    
+    # 门店特定参数（可覆盖全局默认值）
+    overrides:
+      daily_fixed_cost: 1200.0  # 如果该店固定成本不同
+      # delivery:  # 如果配送费结构不同
+      #   base_fee: 6.0
+    
+    # 平台佣金率（如果多平台运营）
+    platforms:
+      meituan: 0.18  # 美团佣金18%
+      eleme: 0.20    # 饿了么佣金20%
+      self_delivery: 0.05  # 自配送成本5%
+  
+  # 示例：鹿小仓财富店
+  cai fu:
+    store_id: "caifu"
+    store_name: "鹿小仓财富店"
+    
+    overrides:
+      daily_fixed_cost: 900.0
+    
+    platforms:
+      meituan: 0.18
+      eleme: 0.20

@@ -7,7 +7,7 @@ HOST = "120.26.176.215"
 USER = "root"
 PASS = "DOWson1108"
 REMOTE_DIR = "/opt/luxiaocang"
-FILES = ["app.py", "agent_loop.py", "analytics.py", "memory.py", "ingestion.py", "build_store.py", "static/index.html"]
+FILES = ["app.py", "agent_loop.py", "analytics.py", "memory.py", "ingestion.py", "build_store.py", "calculator.py", "pricing.py", "static/index.html"]
 LIB_FILES = ["static/lib/echarts.min.js"]
 
 transport = paramiko.Transport((HOST, 22))
