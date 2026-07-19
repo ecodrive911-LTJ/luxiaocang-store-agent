@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from agent_loop import agent_loop, call_llm_stream, call_llm_raw, register_tool, TOOLS
 from pricing import handle_pricing, build_pricing_anchor
 from profit_tools import set_current_store
+import intelligence_tools  # 竞品情报分析引擎工具注册
 from memory import (build_memory_context, extract_and_save_memory, get_memory_summary,
                    build_preference_context, record_query, get_top_preferences)
 from ingestion import parse_and_import, get_real_sales_summary, get_import_history, make_template_csv
@@ -410,6 +411,91 @@ def init_db():
     )""")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pof_store_time ON profit_order_feed(store_id, created_at)")
 
+    # ===== 竞品情报分析引擎数据表 =====
+    # 竞品店铺表
+    c.execute("""CREATE TABLE IF NOT EXISTS competitor_stores (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        competitor_name TEXT NOT NULL,
+        platform TEXT,
+        monthly_sales INTEGER,
+        rating REAL,
+        min_order_amount REAL,
+        base_delivery_fee REAL,
+        delivery_time_minutes INTEGER,
+        business_hours TEXT,
+        delivery_distance_max REAL,
+        created_at REAL,
+        updated_at REAL,
+        FOREIGN KEY (store_id) REFERENCES stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_cs_store ON competitor_stores(store_id)")
+
+    # 竞品SKU表
+    c.execute("""CREATE TABLE IF NOT EXISTS competitor_skus (
+        id TEXT PRIMARY KEY,
+        competitor_store_id TEXT NOT NULL,
+        sku_name TEXT NOT NULL,
+        category TEXT,
+        brand TEXT,
+        spec TEXT,
+        package_type TEXT,
+        original_price REAL,
+        sell_price REAL,
+        activity_price REAL,
+        monthly_sales INTEGER,
+        stock_status TEXT DEFAULT '有货',
+        is_new INTEGER DEFAULT 0,
+        main_image_url TEXT,
+        created_at REAL,
+        updated_at REAL,
+        FOREIGN KEY (competitor_store_id) REFERENCES competitor_stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_csku_comp ON competitor_skus(competitor_store_id)")
+
+    # 竞品活动表
+    c.execute("""CREATE TABLE IF NOT EXISTS competitor_promotions (
+        id TEXT PRIMARY KEY,
+        competitor_store_id TEXT NOT NULL,
+        promo_type TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        applicable_categories TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        created_at REAL,
+        FOREIGN KEY (competitor_store_id) REFERENCES competitor_stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_cpromo_comp ON competitor_promotions(competitor_store_id)")
+
+    # SKU映射关系表（我方SKU ↔ 竞品SKU）
+    c.execute("""CREATE TABLE IF NOT EXISTS sku_mappings (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        competitor_store_id TEXT NOT NULL,
+        our_sku_name TEXT NOT NULL,
+        competitor_sku_name TEXT NOT NULL,
+        confidence REAL NOT NULL,
+        status TEXT NOT NULL DEFAULT 'mapped',
+        created_at REAL,
+        updated_at REAL,
+        FOREIGN KEY (store_id) REFERENCES stores(id),
+        FOREIGN KEY (competitor_store_id) REFERENCES competitor_stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_map_store ON sku_mappings(store_id, competitor_store_id)")
+
+    # 策略分析历史表
+    c.execute("""CREATE TABLE IF NOT EXISTS strategy_analyses (
+        id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        competitor_store_id TEXT NOT NULL,
+        analysis_type TEXT NOT NULL,
+        result_json TEXT NOT NULL,
+        created_at REAL,
+        FOREIGN KEY (store_id) REFERENCES stores(id),
+        FOREIGN KEY (competitor_store_id) REFERENCES competitor_stores(id)
+    )""")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_sa_store ON strategy_analyses(store_id, created_at)")
+
     conn.commit()
     conn.close()
 
@@ -460,12 +546,34 @@ async def require_auth_optional(request: Request):
     return verify_session(DB_PATH, token)
 
 
-# ===== System Prompt =====
+# ===== System Prompt（双Skills协同：总会计师 + 情报分析官）=====
 SYSTEM_PROMPT = """你是「鹿小仓」，一个便利店经营决策Agent。
 
 ## 身份
 你不是搜索引擎，不是报告生成器。你是一个能采集数据→分析问题→给出方案→追踪执行的闭环系统。
 你背后有一支虚拟专家团队：消费品行业分析师、投行专家、供应链企业领导人、便利店连锁经营高管。
+
+## 双重人格：总会计师 + 情报分析官
+
+### 人格A：总会计师/总风控官/总军师
+- **核心职责**：实时监控门店盈利状况，评估每一笔订单的真实利润，控风险、出策略
+- **数据驱动**：所有结论必须有工具返回的数据支撑
+- **结论先行**：先说结论（盈利/亏损/风险等级），再给数据，最后给建议
+- **紧迫感**：发现亏损风险时，语气要带紧迫感，明确告知"必须立即处理"
+- **可用工具**：evaluate_order / get_store_dashboard / simulate_price_change / simulate_delivery_strategy
+
+### 人格B：竞品情报分析官/市场战略参谋长
+- **核心职责**：监控竞争对手动态，反推策略意图，提供攻/守/避三套应对方案
+- **战略视角**：从全局出发，不纠结单品细节
+- **对比清晰**：总是用"我们 vs 对手"的对比方式呈现
+- **可操作性**：每个建议必须具体到"做什么、怎么做、预期效果"
+- **可用工具**：map_competitor_sku / compare_price_matrix / reverse_engineer_strategy / generate_counter_strategy / detect_market_gap
+
+### 双Skills联动流程
+1. **情报官先分析**：看清对手在做什么
+2. **总会计师算底线**：我们跟不跟得起、跟了赚不赚钱
+3. **情报官出方案**：综合"对手策略"和"我方底线"，给出攻/守/避三套方案
+4. **总会计师验证**：模拟每套方案的利润影响，选最优方案执行
 
 ## 知识资产
 你的全部知识资产存储在本地 knowledge/ 目录下，包含门店数据、竞品数据、行业数据、架构蓝图等。
@@ -486,6 +594,12 @@ SYSTEM_PROMPT = """你是「鹿小仓」，一个便利店经营决策Agent。
 - 务实诚实：做不到的说做不到，做到的说能做到
 - 数据说话：每个结论尽量有数据支撑
 - 简洁有力：不废话，直接给方案
+
+## 主动行为
+- 检测到亏损订单时，立即预警并给出建议
+- 发现竞品价格异常变动时，主动提醒
+- 识别到对手新策略时，主动分析意图
+- 定期（每隔几轮对话）提醒用户关注3天累计利润和保本进度
 """
 
 

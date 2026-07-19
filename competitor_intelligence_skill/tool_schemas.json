@@ -1,0 +1,104 @@
+[
+  {
+    "name": "map_competitor_sku",
+    "description": "建立我方SKU与竞品SKU的映射关系。通过四维特征（品牌/品类/规格/包装）自动匹配，输出置信度。置信度>0.85自动映射，0.6-0.85标记待审，<0.6标记为我方独有。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "competitor_name": {"type": "string", "description": "竞品店铺名称"},
+        "competitor_skus": {
+          "type": "array",
+          "description": "竞品SKU列表",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sku_name": {"type": "string"},
+              "sell_price": {"type": "number"},
+              "category": {"type": "string"},
+              "brand": {"type": "string"},
+              "spec": {"type": "string"},
+              "package": {"type": "string"}
+            },
+            "required": ["sku_name"]
+          }
+        },
+        "store_id": {"type": "string", "description": "我方门店ID"}
+      },
+      "required": ["competitor_name", "competitor_skus", "store_id"]
+    }
+  },
+  {
+    "name": "compare_price_matrix",
+    "description": "生成我方与竞品的价格全景对比矩阵。显示每个映射商品的价差百分比、整体价格指数，并标记显著差异项。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "competitor_id": {"type": "string", "description": "竞品ID（map_competitor_sku返回的competitor_id）"},
+        "store_id": {"type": "string", "description": "我方门店ID"},
+        "category_filter": {"type": "string", "description": "按品类筛选（可选）"}
+      },
+      "required": ["competitor_id", "store_id"]
+    }
+  },
+  {
+    "name": "reverse_engineer_strategy",
+    "description": "反推竞品的经营策略。识别每个SKU的角色（引流款/利润款/凑单款），判断满减/折扣的真实意图（拉新/提客单/清库存），输出整体策略判断。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "competitor_id": {"type": "string", "description": "竞品ID"},
+        "store_id": {"type": "string", "description": "我方门店ID"},
+        "promotions": {
+          "type": "array",
+          "description": "竞品当前活动列表",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {"type": "string", "enum": ["满减", "折扣", "第N件优惠", "秒杀", "新客", "运费减免", "赠品"]},
+              "detail": {"type": "string", "description": "活动详情，如'满39减5'"}
+            },
+            "required": ["type", "detail"]
+          }
+        }
+      },
+      "required": ["competitor_id", "store_id"]
+    }
+  },
+  {
+    "name": "generate_counter_strategy",
+    "description": "基于竞品策略和我方底线，生成攻/守/避三套应对方案。每套方案包含具体操作、预期效果和风险提示。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "competitor_id": {"type": "string", "description": "竞品ID"},
+        "store_id": {"type": "string", "description": "我方门店ID"},
+        "my_cost_data": {
+          "type": "array",
+          "description": "我方商品成本数据",
+          "items": {
+            "type": "object",
+            "properties": {
+              "sku_name": {"type": "string"},
+              "purchase_cost": {"type": "number"},
+              "current_price": {"type": "number"}
+            },
+            "required": ["sku_name", "purchase_cost", "current_price"]
+          }
+        }
+      },
+      "required": ["competitor_id", "store_id", "my_cost_data"]
+    }
+  },
+  {
+    "name": "detect_market_gap",
+    "description": "在竞品未覆盖或覆盖弱的品类/价格带中发现市场机会。输出机会列表和评分。",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "competitor_id": {"type": "string", "description": "竞品ID"},
+        "store_id": {"type": "string", "description": "我方门店ID"}
+      },
+      "required": ["competitor_id", "store_id"]
+    }
+  }
+]
