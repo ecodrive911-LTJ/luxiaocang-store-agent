@@ -531,12 +531,14 @@ function renderProductList(d, col) {
   card.className = 'card';
   var head = '<div class="card-head"><span class="dot"></span>商品诊断列表<span class="card-tag">第二级</span></div>';
 
-  var samples = (d && d.samples) || {};
+  var cls = (d && d.classification) || d || {};
+  var summary = cls.summary || {};
+  var samples = cls.samples || {};
   var tiers = [['profit','tier-profit','利润品'],['traffic','tier-traffic','引流品'],['regular','tier-regular','常规品'],['long_tail','tier-long','长尾品']];
   var items = [];
   tiers.forEach(function(t){
     (samples[t[0]] || []).forEach(function(p){
-      items.push({ name: p.sku_name || p.name || '未命名', price: p.sell_price || p.price, profit: p.gross_profit, tier: t[1], tierLabel: t[2] });
+      items.push({ name: p.name || p.sku_name || '未命名', price: p.price != null ? p.price : (p.sell_price != null ? p.sell_price : null), profit: p.gross_profit, markup: p.markup_rate, tier: t[1], tierLabel: t[2] });
     });
   });
 
@@ -546,14 +548,20 @@ function renderProductList(d, col) {
     return;
   }
 
-  var html = head + '<div style="max-height:340px;overflow-y:auto">';
-  items.slice(0, 30).forEach(function(it, idx){
+  var summHtml = '';
+  if (summary.total) {
+    summHtml = '<div class="card-row" style="background:var(--bg-warm);border-radius:8px;padding:6px 8px;margin-bottom:8px">' +
+      '共 <b>' + summary.total + '</b> 个商品 · 利润品 <b>' + (summary.profit||0) + '</b> · 引流品 <b>' + (summary.traffic||0) + '</b> · 长尾 <b>' + (summary.long_tail||0) + '</b></div>';
+  }
+
+  var html = head + summHtml + '<div style="max-height:330px;overflow-y:auto">';
+  items.slice(0, 30).forEach(function(it){
     var priceTxt = it.price != null ? ('¥' + fmt(it.price)) : '';
     var profitTxt = it.profit != null ? ('毛利 ' + fmt(it.profit)) : '';
     html += '<div class="prod-item" onclick="drillProduct(\'' + enc(it.name) + '\')">' +
       '<span class="tier-pill ' + it.tier + '">' + it.tierLabel + '</span>' +
       '<span class="prod-name">' + esc(it.name) + '</span>' +
-      '<span class="prod-price">' + priceTxt + '</span>' +
+      '<span style="text-align:right"><span class="prod-price">' + priceTxt + '</span><br><span class="prod-meta">' + profitTxt + '</span></span>' +
       '</div>';
   });
   html += '</div>';
