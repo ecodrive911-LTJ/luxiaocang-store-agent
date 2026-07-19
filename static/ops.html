@@ -1,0 +1,763 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>鹿小仓 · 运维端</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --brand: #E8533E;
+  --brand-light: #FFF4F2;
+  --brand-soft: #FDECE8;
+  --brand-dark: #C73E2A;
+  --brand-gradient: linear-gradient(135deg, #E8533E 0%, #F59E6C 100%);
+  --bg: #FAFAF7;
+  --bg-warm: #FDF8F5;
+  --surface: #FFFFFF;
+  --text: #2D2A26;
+  --text-secondary: #7A756E;
+  --text-muted: #A8A29E;
+  --border: rgba(0,0,0,0.06);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 40px rgba(232,83,62,0.12);
+  --radius: 16px;
+  --radius-sm: 12px;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+html, body {
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== Login ===== */
+#login-screen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-warm);
+  z-index: 100;
+  overflow: hidden;
+}
+#login-screen.hidden { display: none; }
+.login-card {
+  background: var(--surface);
+  border-radius: 28px;
+  padding: 48px 36px 40px;
+  width: 380px; max-width: 88%;
+  box-shadow: var(--shadow-lg);
+  border: 1px solid rgba(232,83,62,0.06);
+}
+.login-brand { margin-bottom: 32px; text-align: center; }
+.brand-row { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.brand-logo {
+  width: 96px; height: 96px; border-radius: 22px; overflow: hidden; flex-shrink: 0;
+  box-shadow: 0 8px 24px rgba(232,83,62,0.18);
+}
+.brand-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.brand-name {
+  font-family: 'LiSu', 'STLiti', '隶书', 'KaiTi', 'STKaiti', '楷体', serif;
+  font-size: 40px; font-weight: 400; color: var(--text); letter-spacing: 3px; line-height: 1;
+}
+.brand-sub { font-size: 12.5px; color: var(--text-muted); margin-top: 14px; letter-spacing: 3px; }
+.login-field { margin-bottom: 16px; }
+.login-field label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500; }
+.login-field input {
+  width: 100%; padding: 13px 16px; background: var(--bg);
+  border: 1.5px solid var(--border); border-radius: var(--radius-sm);
+  font-size: 15px; color: var(--text); outline: none; font-family: inherit;
+  transition: all 0.3s var(--ease);
+}
+.login-field input:focus { border-color: var(--brand); background: var(--brand-light); box-shadow: 0 0 0 4px rgba(232,83,62,0.06); }
+.login-btn {
+  width: 100%; padding: 14px; background: var(--brand-gradient); color: white; border: none;
+  border-radius: var(--radius-sm); font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 8px;
+  font-family: inherit; letter-spacing: 0.5px; transition: all 0.3s var(--ease);
+}
+.login-btn:active { transform: scale(0.98); }
+.login-error { color: var(--brand); font-size: 12px; text-align: center; margin-top: 12px; min-height: 18px; font-weight: 500; }
+.login-footer { text-align: center; margin-top: 22px; font-size: 11px; color: var(--text-muted); letter-spacing: 0.3px; }
+
+/* ===== App shell ===== */
+#app { display: none; flex-direction: column; height: 100%; }
+#app.active { display: flex; }
+
+/* Top bar */
+.topbar {
+  display: flex; align-items: center; gap: 12px;
+  height: 52px; padding: 0 16px; flex-shrink: 0;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  z-index: 5;
+}
+.topbar-logo { width: 32px; height: 32px; border-radius: 9px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 6px rgba(232,83,62,0.12); }
+.topbar-logo img { width: 100%; height: 100%; object-fit: cover; }
+.topbar-title { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+.topbar-title .sub { font-size: 11px; color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+.topbar-store {
+  margin-left: auto; font-size: 12.5px; color: var(--text-secondary);
+  background: var(--bg-warm); padding: 5px 12px; border-radius: 20px;
+  display: flex; align-items: center; gap: 6px; max-width: 45%;
+}
+.topbar-store b { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-store::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #4ADE80; flex-shrink: 0; }
+.topbar-mgr { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
+.topbar-mgr .ic { width: 14px; height: 14px; color: var(--brand); }
+.topbar-logout {
+  padding: 6px 12px; font-size: 12px; color: var(--text-secondary);
+  background: rgba(0,0,0,0.03); border: none; border-radius: 20px; cursor: pointer; font-family: inherit; font-weight: 500;
+}
+.topbar-logout:hover { background: rgba(0,0,0,0.06); }
+
+/* Mobile tab switch */
+.mobile-tabs { display: none; }
+
+/* Main split */
+.main { flex: 1; display: flex; min-height: 0; }
+
+/* Chat pane */
+.chat-pane {
+  width: 340px; flex-shrink: 0; display: flex; flex-direction: column;
+  background: var(--bg-warm); border-right: 1px solid var(--border); min-height: 0;
+}
+.chat-header {
+  display: flex; align-items: center; padding: 12px 16px; gap: 10px;
+  border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0;
+}
+.chat-header-avatar { width: 38px; height: 38px; border-radius: 11px; overflow: hidden; flex-shrink: 0; box-shadow: 0 2px 6px rgba(232,83,62,0.12); }
+.chat-header-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.chat-header-name { font-size: 14px; font-weight: 600; }
+.chat-header-status { font-size: 11px; color: var(--text-muted); margin-top: 1px; display: flex; align-items: center; gap: 4px; }
+.chat-header-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #4ADE80; display: inline-block; }
+.chat-header-status.thinking::before { background: var(--brand); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: 0.4; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.2); } }
+
+.chat-messages { flex: 1; overflow-y: auto; padding: 16px 14px; -webkit-overflow-scrolling: touch; }
+.msg-row { display: flex; margin-bottom: 14px; animation: msgIn 0.4s var(--ease); }
+@keyframes msgIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.msg-row.user { justify-content: flex-end; }
+.msg-row.ai { justify-content: flex-start; }
+.msg-avatar { width: 28px; height: 28px; border-radius: 8px; overflow: hidden; flex-shrink: 0; margin-top: 2px; }
+.msg-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.msg-row.ai .msg-avatar { margin-right: 8px; }
+.msg-bubble { max-width: 80%; padding: 10px 14px; font-size: 14px; line-height: 1.65; word-break: break-word; }
+.msg-row.user .msg-bubble { background: var(--brand-gradient); color: white; border-radius: var(--radius) var(--radius) 6px var(--radius); box-shadow: 0 2px 12px rgba(232,83,62,0.2); }
+.msg-row.ai .msg-bubble { background: var(--surface); color: var(--text); border-radius: var(--radius) var(--radius) var(--radius) 6px; box-shadow: var(--shadow-sm); border: 1px solid var(--border); }
+.msg-bubble strong { font-weight: 600; }
+.msg-bubble code { background: rgba(0,0,0,0.05); padding: 2px 5px; border-radius: 4px; font-size: 13px; }
+.msg-row.user .msg-bubble code { background: rgba(255,255,255,0.15); }
+.msg-bubble ul, .msg-bubble ol { margin: 6px 0; padding-left: 18px; }
+.msg-bubble li { margin: 3px 0; }
+
+.typing-dots { display: inline-flex; gap: 4px; padding: 2px 0; }
+.typing-dots span { width: 6px; height: 6px; background: var(--brand); border-radius: 50%; opacity: 0.4; animation: typing 1.4s ease-in-out infinite; }
+.typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes typing { 0%,80%,100% { opacity: 0.2; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1); } }
+
+.welcome-area { text-align: center; padding: 28px 16px; }
+.welcome-avatar { width: 52px; height: 52px; border-radius: 15px; overflow: hidden; margin: 0 auto 12px; box-shadow: 0 4px 16px rgba(232,83,62,0.15); }
+.welcome-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.welcome-area h3 { font-size: 15px; font-weight: 600; margin-bottom: 5px; }
+.welcome-area p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; }
+
+.quick-bar { padding: 0 14px; }
+.quick-label { font-size: 11px; color: var(--text-muted); margin-bottom: 7px; font-weight: 500; }
+.quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 10px; }
+.quick-q {
+  padding: 9px 12px; font-size: 12.5px; color: var(--brand); background: var(--brand-light);
+  border: 1px solid rgba(232,83,62,0.08); border-radius: var(--radius-sm); cursor: pointer;
+  font-family: inherit; text-align: left; line-height: 1.3; font-weight: 500; transition: all 0.2s;
+}
+.quick-q:hover { background: var(--brand-soft); transform: translateY(-1px); }
+.quick-q:active { transform: scale(0.97); }
+
+.chat-input-area { display: flex; align-items: flex-end; padding: 10px 14px 12px; background: var(--surface); border-top: 1px solid var(--border); gap: 8px; flex-shrink: 0; }
+.chat-input {
+  flex: 1; padding: 11px 16px; background: var(--bg); border: 1.5px solid var(--border); border-radius: 22px;
+  font-size: 14px; color: var(--text); outline: none; resize: none; max-height: 90px; line-height: 1.5; font-family: inherit; transition: all 0.3s var(--ease);
+}
+.chat-input:focus { border-color: var(--brand); background: var(--brand-light); box-shadow: 0 0 0 4px rgba(232,83,62,0.04); }
+.send-btn { width: 40px; height: 40px; border-radius: 50%; background: var(--brand-gradient); border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 2px 8px rgba(232,83,62,0.25); }
+.send-btn:disabled { opacity: 0.4; cursor: default; box-shadow: none; }
+.send-btn svg { width: 17px; height: 17px; fill: white; }
+
+/* Canvas pane */
+.canvas-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-warm); }
+.canvas-toolbar {
+  display: flex; align-items: center; gap: 8px; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; overflow-x: auto;
+}
+.breadcrumb { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 5px; white-space: nowrap; }
+.breadcrumb .cur { color: var(--brand); font-weight: 600; }
+.breadcrumb .sep { color: #D8D4CF; }
+.canvas-hint { margin-left: auto; font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+
+.canvas-scroll { flex: 1; overflow-x: auto; overflow-y: auto; padding: 28px 24px; }
+.canvas-flow { display: flex; align-items: stretch; gap: 0; min-height: 100%; min-width: max-content; }
+
+.tier-col { display: flex; flex-direction: column; gap: 14px; }
+.connector { display: flex; align-items: center; justify-content: center; width: 44px; flex-shrink: 0; }
+.connector svg { width: 40px; height: 24px; }
+
+/* Cards */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: var(--shadow-sm); padding: 14px 16px; width: 230px; flex-shrink: 0;
+  animation: cardIn 0.4s var(--ease);
+}
+@keyframes cardIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+.card.store { border: 1.5px solid var(--brand); width: 250px; }
+.card-head {
+  display: flex; align-items: center; gap: 7px; padding-bottom: 10px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600;
+}
+.card.store .card-head { color: var(--brand-dark); }
+.card-head .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--brand); flex-shrink: 0; }
+.card-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; background: var(--brand-light); color: var(--brand); margin-left: auto; }
+.card-row { font-size: 12.5px; color: var(--text-secondary); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.card-row b { color: var(--text); font-weight: 600; }
+.status-on { color: #16A34A; font-weight: 600; }
+.status-off { color: #DC2626; font-weight: 600; }
+
+.card-actions { display: flex; gap: 8px; margin-top: 12px; }
+.btn-sm {
+  flex: 1; padding: 8px; font-size: 12.5px; font-weight: 600; border-radius: 10px; cursor: pointer;
+  font-family: inherit; border: 1px solid var(--brand); background: var(--brand-light); color: var(--brand); transition: all 0.2s;
+}
+.btn-sm:hover { background: var(--brand-soft); }
+.btn-sm:active { transform: scale(0.97); }
+.btn-sm.alt { background: var(--surface); color: var(--text-secondary); border-color: var(--border); }
+.btn-sm.alt:hover { background: var(--bg); }
+
+/* product list */
+.prod-item {
+  display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 10px;
+  cursor: pointer; transition: all 0.15s; border: 1px solid transparent;
+}
+.prod-item:hover { background: var(--brand-light); border-color: rgba(232,83,62,0.1); }
+.prod-name { font-size: 13px; font-weight: 500; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prod-meta { font-size: 11px; color: var(--text-muted); }
+.tier-pill { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 9px; flex-shrink: 0; }
+.tier-profit { background: #EAF3DE; color: #3B6D11; }
+.tier-traffic { background: #E6F1FB; color: #185FA5; }
+.tier-regular { background: #F1EFE8; color: #5F5E5A; }
+.tier-long { background: #FAEEDA; color: #854F0B; }
+.prod-price { font-size: 12px; font-weight: 600; color: var(--brand-dark); }
+
+/* competitor card */
+.card.comp { border: 1.5px solid var(--brand); }
+.comp-price { font-size: 22px; font-weight: 600; color: var(--brand); margin: 4px 0; }
+.comp-vs { font-size: 11px; color: var(--text-muted); }
+.comp-empty { font-size: 12.5px; color: var(--text-muted); line-height: 1.6; padding: 8px 0; }
+.comp-empty b { color: var(--brand); }
+
+.loading-line { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; padding: 6px 0; }
+
+/* Scrollbars */
+.chat-messages::-webkit-scrollbar, .canvas-scroll::-webkit-scrollbar, .canvas-toolbar::-webkit-scrollbar { width: 5px; height: 5px; }
+.chat-messages::-webkit-scrollbar-thumb, .canvas-scroll::-webkit-scrollbar-thumb, .canvas-toolbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 3px; }
+
+/* Mobile */
+@media (max-width: 760px) {
+  .chat-pane { width: 100%; border-right: none; }
+  .canvas-pane { display: none; }
+  #app.show-canvas .chat-pane { display: none; }
+  #app.show-canvas .canvas-pane { display: flex; }
+  .mobile-tabs {
+    display: flex; gap: 0; padding: 0; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .mobile-tab {
+    flex: 1; padding: 11px; text-align: center; font-size: 13px; font-weight: 600; color: var(--text-muted);
+    background: none; border: none; cursor: pointer; font-family: inherit; border-bottom: 2px solid transparent;
+  }
+  .mobile-tab.active { color: var(--brand); border-bottom-color: var(--brand); }
+  .topbar-store { max-width: 38%; font-size: 11px; }
+  .topbar-mgr { display: none; }
+  .card, .card.store { width: 210px; }
+}
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <div class="brand-row">
+        <div class="brand-logo"><img src="logo.jpg" alt="鹿小仓"></div>
+        <div class="brand-name">鹿小仓</div>
+      </div>
+      <div class="brand-sub">复投科技 出品</div>
+    </div>
+    <div class="login-field">
+      <label>用户名</label>
+      <input type="text" id="login-user" placeholder="请输入用户名" autocomplete="username">
+    </div>
+    <div class="login-field">
+      <label>密码</label>
+      <input type="password" id="login-pass" placeholder="请输入密码" autocomplete="current-password">
+    </div>
+    <button class="login-btn" onclick="doLogin()">进入运维端</button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-footer">为便利店老板而造 · 让经营更轻松</div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app">
+  <!-- top bar -->
+  <div class="topbar">
+    <div class="topbar-logo"><img src="logo.jpg" alt="鹿小仓"></div>
+    <div class="topbar-title">鹿小仓·运维端<span class="sub">经营决策工作台</span></div>
+    <div class="topbar-store">当前激活：<b id="top-store">加载中…</b></div>
+    <div class="topbar-mgr">
+      <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 20h16M6 20V10l6-4 6 4v10M10 20v-5h4v5"/></svg>
+      <span id="top-mgr">运维经理</span>
+    </div>
+    <button class="topbar-logout" onclick="doLogout()">退出</button>
+  </div>
+
+  <!-- mobile tab switch -->
+  <div class="mobile-tabs">
+    <button class="mobile-tab active" id="tab-chat" onclick="switchTab('chat')">对话</button>
+    <button class="mobile-tab" id="tab-canvas" onclick="switchTab('canvas')">画布</button>
+  </div>
+
+  <div class="main">
+    <!-- chat -->
+    <div class="chat-pane">
+      <div class="chat-header">
+        <div class="chat-header-avatar"><img src="logo.jpg" alt="鹿小仓"></div>
+        <div>
+          <div class="chat-header-name">鹿小仓</div>
+          <div class="chat-header-status" id="header-status">在线</div>
+        </div>
+      </div>
+      <div class="chat-messages" id="chat-messages">
+        <div class="welcome-area" id="welcome-area">
+          <div class="welcome-avatar"><img src="logo.jpg" alt="鹿小仓"></div>
+          <h3>你好，我是鹿小仓</h3>
+          <p>左侧跟我聊，右侧画布会跟着你的操作长出卡片<br>试试「商品诊断」或「对手」</p>
+        </div>
+      </div>
+      <div class="quick-bar" id="quick-bar">
+        <div class="quick-label">试试问我</div>
+        <div class="quick-grid">
+          <button class="quick-q" onclick="sendQuick(this)">📊 今天的订单怎么样</button>
+          <button class="quick-q" onclick="sendQuick(this)">💰 帮我分析一下利润</button>
+          <button class="quick-q" onclick="sendQuick(this)">🏪 附近竞品在做什么</button>
+          <button class="quick-q" onclick="sendQuick(this)">🎯 有什么可以优化的</button>
+        </div>
+      </div>
+      <div class="chat-input-area">
+        <textarea class="chat-input" id="chat-input" rows="1" placeholder="说点什么..." onkeydown="handleKey(event)" oninput="autoResize(this)"></textarea>
+        <button class="send-btn" id="send-btn" onclick="sendMessage()">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- canvas -->
+    <div class="canvas-pane">
+      <div class="canvas-toolbar">
+        <div class="breadcrumb" id="breadcrumb"><span class="cur">所有门店</span></div>
+        <div class="canvas-hint">← 横向拖动查看层级 →</div>
+      </div>
+      <div class="canvas-scroll">
+        <div class="canvas-flow" id="canvas-flow">
+          <!-- store card injected here -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+var token = localStorage.getItem('lxiaocang_token') || '';
+var sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+var isStreaming = false;
+var currentStore = null;     // {id, name, address, ...}
+var drillState = [];         // breadcrumb trail
+var competitors = [];        // cached competitor list
+
+if (token) { boot(); }
+
+function boot() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app').classList.add('active');
+  loadMe();
+}
+
+function doLogin() {
+  var user = document.getElementById('login-user').value.trim();
+  var pass = document.getElementById('login-pass').value;
+  var err = document.getElementById('login-error');
+  err.textContent = '';
+  if (!user || !pass) { err.textContent = '请填写用户名和密码'; return; }
+  fetch('/api/auth/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: user, password: pass })
+  }).then(function(res) {
+    return res.json().then(function(data) {
+      if (!res.ok) { err.textContent = data.detail || '登录失败'; return; }
+      token = data.token || data.access_token || '';
+      localStorage.setItem('lxiaocang_token', token);
+      boot();
+    });
+  }).catch(function() { err.textContent = '网络错误，请重试'; });
+}
+
+function doLogout() {
+  token = '';
+  localStorage.removeItem('lxiaocang_token');
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('login-screen').classList.remove('hidden');
+  resetChat();
+  document.getElementById('canvas-flow').innerHTML = '';
+  document.getElementById('top-store').textContent = '加载中…';
+}
+
+function loadMe() {
+  fetch('/api/auth/me', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if (d.user && d.user.display_name) document.getElementById('top-mgr').textContent = d.user.display_name;
+      if (d.user && d.user.username) document.getElementById('top-mgr').textContent = d.user.username;
+      loadStores();
+    })
+    .catch(function(){ loadStores(); });
+}
+
+function loadStores() {
+  fetch('/api/stores', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      var stores = (d.stores || []);
+      if (!stores.length) {
+        document.getElementById('top-store').textContent = '无门店';
+        renderStoreCard(null);
+        return;
+      }
+      currentStore = stores[0];
+      document.getElementById('top-store').textContent = currentStore.name;
+      renderStoreCard(currentStore);
+      loadCompetitors();
+    })
+    .catch(function(){
+      document.getElementById('top-store').textContent = '加载失败';
+      renderStoreCard(null);
+    });
+}
+
+function loadCompetitors() {
+  fetch('/api/intelligence/competitors', { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      competitors = (d || []);
+    })
+    .catch(function(){ competitors = []; });
+}
+
+/* ===== Canvas rendering ===== */
+function renderStoreCard(store) {
+  var flow = document.getElementById('canvas-flow');
+  flow.innerHTML = '';
+  drillState = [];
+  setBreadcrumb([{ label: '所有门店' }]);
+
+  var col = document.createElement('div');
+  col.className = 'tier-col';
+
+  if (!store) {
+    col.innerHTML = '<div class="card"><div class="card-head"><span class="dot"></span>提示</div>' +
+      '<div class="comp-empty">还没绑定门店。<br>去聊天里让鹿小仓帮你建一个店吧。</div></div>';
+    flow.appendChild(col);
+    return;
+  }
+
+  var addr = store.address || store.city || store.district || '地址未填写';
+  var card = document.createElement('div');
+  card.className = 'card store';
+  card.innerHTML =
+    '<div class="card-head"><span class="dot"></span>门店主卡片<span class="card-tag">第一级</span></div>' +
+    '<div class="card-row"><b>' + esc(store.name) + '</b></div>' +
+    '<div class="card-row">📍 ' + esc(addr) + '</div>' +
+    '<div class="card-row">状态：<span class="status-on">运行中</span></div>' +
+    '<div class="card-actions">' +
+      '<button class="btn-sm" onclick="drillProducts()">商品诊断</button>' +
+      '<button class="btn-sm alt" onclick="drillCompetitors()">对手</button>' +
+    '</div>';
+  col.appendChild(card);
+  flow.appendChild(col);
+}
+
+function addConnector() {
+  var flow = document.getElementById('canvas-flow');
+  var c = document.createElement('div');
+  c.className = 'connector';
+  c.innerHTML = '<svg viewBox="0 0 40 24"><path d="M2 12 H30" stroke="#E8533E" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M30 12 L24 7 M30 12 L24 17" stroke="#E8533E" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  flow.appendChild(c);
+}
+
+function drillProducts() {
+  if (!currentStore) return;
+  // remove anything after tier1
+  trimFlowAfter(1);
+  addConnector();
+  var col = document.createElement('div');
+  col.className = 'tier-col';
+  var loading = document.createElement('div');
+  loading.className = 'card';
+  loading.innerHTML = '<div class="loading-line"><span class="typing-dots"><span></span><span></span><span></span></span> 正在诊断商品…</div>';
+  col.appendChild(loading);
+  document.getElementById('canvas-flow').appendChild(col);
+  setBreadcrumb([{ label: '所有门店' }, { label: currentStore.name }, { label: '商品诊断' }]);
+
+  fetch('/api/products/full-analysis?store_id=' + encodeURIComponent(currentStore.id), { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){ renderProductList(d, col); })
+    .catch(function(){ col.innerHTML = '<div class="card"><div class="comp-empty">商品诊断加载失败，请重试。</div></div>'; });
+}
+
+function renderProductList(d, col) {
+  col.innerHTML = '';
+  var card = document.createElement('div');
+  card.className = 'card';
+  var head = '<div class="card-head"><span class="dot"></span>商品诊断列表<span class="card-tag">第二级</span></div>';
+
+  var samples = (d && d.samples) || {};
+  var tiers = [['profit','tier-profit','利润品'],['traffic','tier-traffic','引流品'],['regular','tier-regular','常规品'],['long_tail','tier-long','长尾品']];
+  var items = [];
+  tiers.forEach(function(t){
+    (samples[t[0]] || []).forEach(function(p){
+      items.push({ name: p.sku_name || p.name || '未命名', price: p.sell_price || p.price, profit: p.gross_profit, tier: t[1], tierLabel: t[2] });
+    });
+  });
+
+  if (!items.length) {
+    card.innerHTML = head + '<div class="comp-empty">这个店还没有商品数据。<br>去聊天里把订单/库存发给鹿小仓就能诊断了。</div>';
+    col.appendChild(card);
+    return;
+  }
+
+  var html = head + '<div style="max-height:340px;overflow-y:auto">';
+  items.slice(0, 30).forEach(function(it, idx){
+    var priceTxt = it.price != null ? ('¥' + fmt(it.price)) : '';
+    var profitTxt = it.profit != null ? ('毛利 ' + fmt(it.profit)) : '';
+    html += '<div class="prod-item" onclick="drillProduct(\'' + enc(it.name) + '\')">' +
+      '<span class="tier-pill ' + it.tier + '">' + it.tierLabel + '</span>' +
+      '<span class="prod-name">' + esc(it.name) + '</span>' +
+      '<span class="prod-price">' + priceTxt + '</span>' +
+      '</div>';
+  });
+  html += '</div>';
+  card.innerHTML = html;
+  col.appendChild(card);
+}
+
+function drillProduct(name) {
+  trimFlowAfter(2);
+  addConnector();
+  var col = document.createElement('div');
+  col.className = 'tier-col';
+  var card = document.createElement('div');
+  card.className = 'card comp';
+  card.innerHTML = '<div class="card-head"><span class="dot"></span>竞品情报<span class="card-tag">第三级</span></div>' +
+    '<div class="card-row"><b>' + esc(name) + '</b></div>' +
+    '<div id="prod-detail"><div class="loading-line"><span class="typing-dots"><span></span><span></span><span></span></span> 比对竞品中…</div></div>';
+  col.appendChild(card);
+  document.getElementById('canvas-flow').appendChild(col);
+  setBreadcrumb([{ label: '所有门店' }, { label: currentStore ? currentStore.name : '' }, { label: '商品' }, { label: name }, { label: '竞品情报' }]);
+
+  if (!competitors.length) {
+    document.getElementById('prod-detail').innerHTML =
+      '<div class="comp-empty">还没有录入竞品门店。<br><b>去左侧跟鹿小仓说「记录竞品 7-Eleven 育才街店」</b>，<br>录入后这里就能自动对比价格。</div>';
+    return;
+  }
+  var cid = competitors[0].id || competitors[0].competitor_id;
+  fetch('/api/intelligence/price_matrix?competitor_id=' + encodeURIComponent(cid), { headers: { 'Authorization': 'Bearer ' + token } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){ renderPriceMatrix(d, name); })
+    .catch(function(){
+      document.getElementById('prod-detail').innerHTML = '<div class="comp-empty">价格对比加载失败。</div>';
+    });
+}
+
+function renderPriceMatrix(d, name) {
+  var box = document.getElementById('prod-detail');
+  if (!box) return;
+  var res = (d && d.result) || d || {};
+  // try common shapes
+  var rows = res.rows || res.prices || res.items || (Array.isArray(res) ? res : null);
+  if (rows && rows.length) {
+    var match = rows.filter(function(r){ return (r.sku_name||'').indexOf(name) >= 0 || (name||'').indexOf(r.sku_name||'') >= 0; })[0] || rows[0];
+    var compPrice = match.competitor_price || match.price || match.sell_price;
+    var myPrice = match.my_price || match.our_price || currentStore ? null : null;
+    var html = '';
+    if (compPrice != null) html += '<div class="comp-price">¥' + fmt(compPrice) + '</div><div class="comp-vs">' + esc(match.competitor_name || '竞品') + ' 同款售价</div>';
+    if (myPrice != null) html += '<div class="comp-vs" style="margin-top:6px">你家：¥' + fmt(myPrice) + '（差 ' + fmt(compPrice - myPrice) + ' 元）</div>';
+    if (!html) html = '<div class="comp-empty">已拿到对比数据，但字段格式待确认。<br>把下面这行发给我，我帮你对齐。</div><pre style="font-size:10px;color:#999;white-space:pre-wrap;margin-top:6px">' + esc(JSON.stringify(res).slice(0,160)) + '</pre>';
+    box.innerHTML = html;
+  } else {
+    box.innerHTML = '<div class="comp-empty">这家竞品暂时没有「' + esc(name) + '」的价格记录。<br>去聊天里补充后这里会自动更新。</div>';
+  }
+}
+
+function drillCompetitors() {
+  trimFlowAfter(1);
+  addConnector();
+  var col = document.createElement('div');
+  col.className = 'tier-col';
+  var card = document.createElement('div');
+  card.className = 'card comp';
+  card.innerHTML = '<div class="card-head"><span class="dot"></span>竞品门店<span class="card-tag">第二级</span></div><div id="comp-list"><div class="loading-line"><span class="typing-dots"><span></span><span></span><span></span></span> 加载竞品…</div></div>';
+  col.appendChild(card);
+  document.getElementById('canvas-flow').appendChild(col);
+  setBreadcrumb([{ label: '所有门店' }, { label: currentStore ? currentStore.name : '' }, { label: '竞品门店' }]);
+
+  if (!competitors.length) {
+    document.getElementById('comp-list').innerHTML =
+      '<div class="comp-empty">还没录入竞品。<br><b>在左侧跟鹿小仓说「记录竞品 7-Eleven 育才街店，平台美团」</b>，<br>这里就会长出竞品卡片。</div>';
+    return;
+  }
+  var html = '';
+  competitors.forEach(function(c){
+    var nm = c.competitor_name || c.name || '未命名竞品';
+    var pf = c.platform ? ('平台：' + c.platform) : '';
+    html += '<div class="card-row"><b>' + esc(nm) + '</b></div>';
+    if (pf) html += '<div class="comp-vs">' + esc(pf) + '</div>';
+  });
+  document.getElementById('comp-list').innerHTML = html;
+}
+
+/* helpers */
+function trimFlowAfter(tier) {
+  // tier1 = store col (index 0). Remove connectors + cols after index `tier*2-1`
+  var flow = document.getElementById('canvas-flow');
+  var kids = Array.prototype.slice.call(flow.children);
+  // keep first `tier` columns (store=1, after products=2, after comp=3)
+  var keep = tier * 2 - 1; // number of nodes to keep (col + connectors)
+  while (kids.length > keep) { flow.removeChild(flow.lastChild); kids.pop(); }
+}
+function setBreadcrumb(parts) {
+  var bc = document.getElementById('breadcrumb');
+  bc.innerHTML = '';
+  parts.forEach(function(p, i){
+    if (i > 0) { var s = document.createElement('span'); s.className = 'sep'; s.textContent = '›'; bc.appendChild(s); }
+    var el = document.createElement('span');
+    if (i === parts.length - 1) el.className = 'cur'; else el.className = '';
+    el.textContent = p.label || '';
+    bc.appendChild(el);
+  });
+}
+function esc(s){ return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function enc(s){ return String(s == null ? '' : s).replace(/'/g,"\\'"); }
+function fmt(n){ var v = Number(n); return isNaN(v) ? n : (Math.round(v*100)/100); }
+
+/* ===== Chat (reuse SSE) ===== */
+function handleKey(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function autoResize(el) { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 90) + 'px'; }
+function sendQuick(btn) { document.getElementById('chat-input').value = btn.innerText.replace(/^[^\s]+\s/, ''); sendMessage(); var qb = document.getElementById('quick-bar'); if (qb) qb.style.display = 'none'; }
+function removeWelcome() { var w = document.getElementById('welcome-area'); if (w) w.remove(); }
+function appendMsg(role, text) {
+  removeWelcome();
+  var c = document.getElementById('chat-messages');
+  var row = document.createElement('div'); row.className = 'msg-row ' + role;
+  if (role === 'ai') { var av = document.createElement('div'); av.className = 'msg-avatar'; av.innerHTML = '<img src="logo.jpg" alt="">'; row.appendChild(av); }
+  var b = document.createElement('div'); b.className = 'msg-bubble'; b.innerHTML = role === 'ai' ? renderMd(text) : esc(text).replace(/\n/g,'<br>');
+  row.appendChild(b); c.appendChild(row); c.scrollTop = c.scrollHeight; return b;
+}
+function appendTyping() {
+  removeWelcome();
+  var c = document.getElementById('chat-messages');
+  var row = document.createElement('div'); row.className = 'msg-row ai'; row.id = 'typing-row';
+  row.innerHTML = '<div class="msg-avatar"><img src="logo.jpg" alt=""></div><div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+  c.appendChild(row); c.scrollTop = c.scrollHeight;
+}
+function removeTyping() { var el = document.getElementById('typing-row'); if (el) el.remove(); }
+function renderMd(text) {
+  var h = esc(text);
+  h = h.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  h = h.replace(/\*(.*?)\*/g, '<em>$1</em>');
+  h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+  h = h.replace(/^- (.+)/gm, '<li>$1</li>');
+  h = h.replace(/(<li>[\s\S]*?<\/li>)/g, function(m){ return '<ul>'+m+'</ul>'; });
+  h = h.replace(/\n\n/g, '</p><p>');
+  h = h.replace(/\n/g, '<br>');
+  return h;
+}
+function sendMessage() {
+  if (isStreaming) return;
+  var input = document.getElementById('chat-input');
+  var text = input.value.trim();
+  if (!text) return;
+  input.value = ''; input.style.height = 'auto';
+  isStreaming = true; document.getElementById('send-btn').disabled = true;
+  var status = document.getElementById('header-status');
+  status.textContent = '思考中'; status.className = 'chat-header-status thinking';
+  appendMsg('user', text); appendTyping();
+  var qb = document.getElementById('quick-bar'); if (qb) qb.style.display = 'none';
+
+  fetch('/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+    body: JSON.stringify({ message: text, session_id: sessionId, store_id: currentStore ? currentStore.id : null })
+  }).then(function(res){
+    removeTyping();
+    if (res.status === 401) { doLogout(); return; }
+    if (!res.ok) {
+      res.json().then(function(e){ appendMsg('ai', '抱歉，出了点问题：' + (e.detail || res.statusText)); }).catch(function(){ appendMsg('ai','抱歉，出了点问题'); });
+      finishStream(status); return;
+    }
+    var reader = res.body.getReader(); var decoder = new TextDecoder();
+    var bubble = appendMsg('ai', ''); var full = '';
+    function read() {
+      reader.read().then(function(r){
+        if (r.done) { finishStream(status); return; }
+        var chunk = decoder.decode(r.value, { stream: true });
+        chunk.split('\n').forEach(function(line){
+          if (line.indexOf('data: ') === 0) {
+            var data = line.slice(6);
+            if (data === '[DONE]') return;
+            try {
+              var p = JSON.parse(data);
+              var d = (p.choices && p.choices[0] && p.choices[0].delta && p.choices[0].delta.content) || p.content || '';
+              if (d) { full += d; bubble.innerHTML = renderMd(full); document.getElementById('chat-messages').scrollTop = document.getElementById('chat-messages').scrollHeight; }
+            } catch (e) { if (data && data !== '[DONE]') { full += data; bubble.innerHTML = renderMd(full); } }
+          }
+        });
+        read();
+      });
+    }
+    read();
+  }).catch(function(){
+    removeTyping(); appendMsg('ai', '网络连接失败，请检查网络后重试'); finishStream(status);
+  });
+}
+function finishStream(status) {
+  isStreaming = false; document.getElementById('send-btn').disabled = false;
+  status.textContent = '在线'; status.className = 'chat-header-status';
+}
+function resetChat() {
+  var msgs = document.getElementById('chat-messages');
+  msgs.innerHTML = '<div class="welcome-area" id="welcome-area"><div class="welcome-avatar"><img src="logo.jpg" alt="鹿小仓"></div><h3>你好，我是鹿小仓</h3><p>左侧跟我聊，右侧画布会跟着你的操作长出卡片</p></div>';
+  var qb = document.getElementById('quick-bar'); if (qb) qb.style.display = '';
+}
+function switchTab(which) {
+  var app = document.getElementById('app');
+  document.getElementById('tab-chat').classList.toggle('active', which === 'chat');
+  document.getElementById('tab-canvas').classList.toggle('active', which === 'canvas');
+  if (which === 'chat') app.classList.remove('show-canvas');
+  else app.classList.add('show-canvas');
+}
+
+document.getElementById('login-pass').addEventListener('keydown', function(e){ if (e.key === 'Enter') doLogin(); });
+</script>
+</body>
+</html>
