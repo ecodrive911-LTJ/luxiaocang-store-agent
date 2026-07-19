@@ -1,6 +1,6 @@
 # 鹿小仓 — 任务看板
 
-> 最后更新：2026-07-19  
+> 最后更新：2026-07-19 15:35  
 > 维护者：WorkBuddy Agent  
 > 路线图依据：`docs/鹿小仓AI经营Agent全周期落地路线图_v2.1_20260715.md`
 
@@ -40,7 +40,7 @@
 | D2-08 | 用户偏好学习 | `281d453` | 2026-07-16 | query_stats表 + classify_query(确定性关键词分类,不调LLM) + record_query(对话时记录) + get_top_preferences + build_preference_context(连续5次同类型后注入system prompt) + /api/memory/preferences端点；线上验证V2-07通过 |
 | 建店引擎 | 建店规划引擎 | `bc5834a` | 2026-07-16 | build_store.py(面积→品类权重→SKU推算→货架方案,纯逻辑启发式,默认参数集中可校准) + /api/build_store/plan端点 + agent_loop build_store_plan工具；自测(50/100/200㎡+面积=0异常)全过 + 线上验证(area=100返回完整方案/area=0返回400)通过 |
 | D2-11 | 内部数据采集接入(路线A) | `c2ec8bf` | 2026-07-16 | ingestion.py + raw_orders/raw_reviews/raw_items/import_batches四表 + 灵活中英文列映射解析(美团原生导出) + 真实GMV/毛利/动销率聚合 + 手动Excel/CSV导入端点 + 导入历史 + 模板下载 + 前端数据导入视图；线上验证通过(合成美团xlsx→4行入库→看板data_mode切real,GMV22/订单3/AOV7.33) |
-| 盈利引擎 | 动态盈利决策引擎 | `35c4dbc` | 2026-07-19 | profit_tools.py(4工具:evaluate_order/get_store_dashboard/simulate_price_change/simulate_delivery_strategy) + dynamic_profit_engine.py(配送费模型/保本计算/红线阈值) + SQLite WAL模式解决Windows文件锁 + 集成测试全过 + GitHub push + SFTP部署 + 服务重启成功；线上验证遇字段名不匹配/用户未关联门店(待修) |
+| 盈利引擎 | 动态盈利决策引擎 | `35c4dbc` | 2026-07-19 | profit_tools.py(4工具:evaluate_order/get_store_dashboard/simulate_price_change/simulate_delivery_strategy) + dynamic_profit_engine.py(配送费模型/保本计算/红线阈值) + SQLite WAL模式解决Windows文件锁 + 集成测试全过 + GitHub push + SFTP部署 + 服务重启成功；线上验证：OrderFeedItem字段名修复(name→sku_name等)，guangan门店关联正常，ingest接口200返回净利5.36元 ✅ |
 | 竞品情报 | 竞品情报分析引擎 | `0cdc4c2` | 2026-07-19 | intelligence_tools.py(5工具:map_competitor_sku/compare_price_matrix/reverse_engineer_strategy/generate_counter_strategy/detect_market_gap) + competitor_intelligence_skill/(5文件) + app.py新增5张竞品数据表(competitor_stores/competitor_skus/competitor_promotions/sku_mappings/strategy_analyses) + System Prompt合并(总会计师+情报分析官双人格) + 集成测试5/5通过 + GitHub push + SFTP部署 + 服务重启成功；线上验证9工具全部注册成功 |
 
 ---
@@ -52,7 +52,7 @@
 | P0 | D2-09 | 门店画像&长期记忆 | 3天 | 后端 | 无 | ✅ 已完成（线上验证通过 V2-08/V2-09） |
 | P1 | D2-08 | 用户偏好学习 | 2天 | 后端 | D2-09 | ✅ 已完成（线上验证通过 V2-07，确定性关键词分类，不增加LLM负担） |
 | P2 | D2-11 | 内部数据采集接入 | 3天 | 后端 | 无 | ✅ 已完成（路线A：手动导入，零风控风险；线上验证通过；后续可升级RPA自动抓取） |
-| P0 | — | 盈利引擎线上验证修复 | 1小时 | 后端 | 无 | OrderFeedItem 字段名不匹配 + guangan 用户未关联门店 |
+| P0 | — | 盈利引擎线上验证修复 | 1小时 | 后端 | 无 | ✅ 已完成（OrderFeedItem字段名修复，guangan关联正常，线上验证通过） |
 | P1 | — | 竞品情报数据初始化 | 2小时 | 数据 | 竞品情报引擎 | 按 data_collection_checklist.md 采集竞品数据，录入真实竞品门店数据 |
 | P2 | — | 双 Skill 协同端到端测试 | 3小时 | 后端 | 数据初始化 | 用真实数据测试"对手在做什么+我们的底线在哪=我们该怎么做"完整决策链路 |
 | P3 | — | 三端关系梳理 | 2小时 | 文档 | 无 | 商家端(小程序)/云端(阿里云ECS)/本机(WorkBuddy) 关联关系文档化 |

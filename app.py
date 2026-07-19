@@ -1171,10 +1171,10 @@ async def list_tools():
 # ===== 动态盈利引擎：数据摄入端点 =====
 
 class OrderFeedItem(BaseModel):
-    name: str
+    sku_name: str
     quantity: int
-    price: float
-    cost: float
+    sell_price: float
+    purchase_cost: float
 
 class OrderFeedRequest(BaseModel):
     store_id: str
@@ -1203,7 +1203,7 @@ async def ingest_order_data(req: OrderFeedRequest, user: dict = Depends(require_
     # 调用 evaluate_order 工具（会自动写入 profit_order_feed 表）
     try:
         from profit_tools import evaluate_order
-        items_list = [{"sku_name": it.name, "sell_price": it.price, "purchase_cost": it.cost, "quantity": it.quantity} for it in req.items]
+        items_list = [{"sku_name": it.sku_name, "sell_price": it.sell_price, "purchase_cost": it.purchase_cost, "quantity": it.quantity} for it in req.items]
         result = evaluate_order(
             order_id=req.order_id,
             items=items_list,
